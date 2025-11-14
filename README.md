@@ -1,4 +1,4 @@
-# llm-strace: Stratified Tracing for Language Models
+# :milky_way: llm-strace: Stratified Tracing for Language Models 
 
 llm-strace is a research framework for analyzing Large Language Models by decomposing their computation into "strata," or minimal subgraphs. It is designed for large-scale, reproducible experiments on HPC clusters using Slurm.
 
