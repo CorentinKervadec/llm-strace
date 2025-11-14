@@ -1,0 +1,78 @@
+# ----------------------------------------------------------------
+
+# .gitignore for the llm-strace project
+
+# ----------------------------------------------------------------
+
+# 1. Python & Environment
+
+# --------------------------------
+
+# Ignore Python bytecode and cache
+
+pycache/
+*.py[cod]
+*$py.class
+
+# Ignore virtual environments
+
+venv/
+.venv/
+env/
+.env/
+
+# 2. IDE & Editor Files
+
+# --------------------------------
+
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# 3. Slurm & Job Logs
+
+# --------------------------------
+
+# Ignore logs from the master script
+
+# (e.g., OLMo-2-0425-1B/slurm_logs_20/)
+
+/slurm_logs/
+
+# Ignore logs from the individual test scripts
+
+slurm_logs/
+logs/
+
+# Ignore Slurm output files that might be created at the root
+
+slurm-*.out
+
+# 4. Generated Data & Output
+
+# --------------------------------
+
+# Ignore all generated data files (this is the main output)
+
+*.npz
+
+# Ignore all generated plots and reports
+
+*.pdf
+
+# 5. Generated Directories (Whitelist Strategy)
+
+# --------------------------------
+
+# Ignore all top-level directories
+
+*/
+
+# --- UN-IGNORE (Whitelist) ---
+
+# Now, explicitly re-include the directories that ARE part of the repo.
+
+!src/
+!data/
+!analyse/
