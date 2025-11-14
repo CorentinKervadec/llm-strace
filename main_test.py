@@ -64,7 +64,8 @@ def main(model_name):
     
     # half_precision: If True (recommended), load the model in float16 to save VRAM.
     # Set to False for higher precision (float32).
-    half_precision = True 
+    # For some reason, half_precision might cause approximation error that you don't have with full precision
+    half_precision = False 
     
     # untrained: If True, load a "blank" model with randomized weights
     # for debugging or analysis. /!\ Not tested
