@@ -5,8 +5,8 @@ llm-strace is a research framework for analyzing Large Language Models by decomp
 This framework allows you to:
 1. Model an LLM's forward pass as a complete, directed computation graph.
 2. Assign an "importance" score to every edge (representing attention heads, MLP blocks, and residual connections).
-3. "Stratify" this graph by applying a 'nucleus' filter (like Top-P) to create a series of subgraphs, or "strata
-4. "Evaluate the predictive power of each stratum by running the model "masked" to only that subgraph.
+3. "Stratify" this graph by applying a 'nucleus' filter (like Top-P) to create a series of subgraphs, or "strata".
+4. Evaluate the predictive power of each stratum by running the model "masked" to only that subgraph.
 
 This allows us to analyze questions like, **"What is the minimal set of components required for the model to make a specific prediction?"**
 
