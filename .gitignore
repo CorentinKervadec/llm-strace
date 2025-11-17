@@ -73,6 +73,8 @@ slurm-*.out
 
 # Now, explicitly re-include the directories that ARE part of the repo.
 
-!src/
+!src/llm_graph/
+!src/llm_hooked/
+!src/llm_trace/
 !data/
 !analyse/
