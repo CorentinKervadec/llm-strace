@@ -94,7 +94,7 @@ export TOTAL_SENTENCES=$TOTAL_SENTENCES
 
 # Define all directory paths
 # Define all directory paths with SANITIZED_MODEL_NAME
-BASE_OUTPUT_DIR="$(pwd)/${SANITIZED_MODEL_NAME}"
+BASE_OUTPUT_DIR="$(pwd)/results/${SANITIZED_MODEL_NAME}"
 export INTERMEDIATE_DIR="${BASE_OUTPUT_DIR}/intermediate_graphs_${SENTENCE_LENGTH}"
 export STRACE_DIR="${BASE_OUTPUT_DIR}/intermediate_straces_${SENTENCE_LENGTH}"
 export FINAL_DIR="${BASE_OUTPUT_DIR}/final_straces_${SENTENCE_LENGTH}"
