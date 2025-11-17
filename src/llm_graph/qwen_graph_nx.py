@@ -1,14 +1,14 @@
 from src.llm_graph.llm_graph_nx import LLM_Graph_NX
-from src.llm_hooked.qwen_hooked import Qwen3_Hooked
+from src.llm_hooked.qwen_hooked import Qwen_Hooked
 from typing import Optional
 
-class Qwen3_Graph_NX(LLM_Graph_NX):
+class Qwen_Graph_NX(LLM_Graph_NX):
     """
     Represent Qwen LLM as a computational graph
     """
     def __init__(
             self,
-            qwen_hooked: Optional[Qwen3_Hooked] = None, 
+            qwen_hooked: Optional[Qwen_Hooked] = None, 
             input_sentence: Optional[str] = None, 
             importance_mode: Optional[str] = 'dist',
             **attr):

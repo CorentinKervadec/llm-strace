@@ -28,6 +28,16 @@ AVAILABLE_MODELS = [
     "Qwen/Qwen3-1.7B-Base",
     "Qwen/Qwen3-4B-Base",
     "Qwen/Qwen3-8B-Base",
+    "google/gemma-3-270m",
+    "Qwen/Qwen2.5-0.5B",
+    "Qwen/Qwen2.5-1.5B",
+    "Qwen/Qwen2.5-3B",
+    "Qwen/Qwen2.5-7B",
+    "Qwen/Qwen2.5-14B",
+    "Qwen/Qwen2.5-32B",
+    "Qwen/Qwen2-0.5B",
+    "Qwen/Qwen2-1.5B",
+    "Qwen/Qwen2-7B",
 ]
 
 def main(model_name):

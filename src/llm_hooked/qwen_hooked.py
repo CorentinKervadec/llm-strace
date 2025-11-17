@@ -10,99 +10,7 @@ import src.llm_hooked.sanity_checks as sanity_check
 
 ATTENTION_MASK_VALUE = -65504
 
-# same as Olmo2 -> fuse them into the same "attention_kqnorm" function
-# wait no... a small difference in when to reshape q and k (after or before norm)
-def Qwen3Attention_masked(
-    module,
-    hidden_states,
-    position_embeddings,
-    attention_mask,
-    mask,
-    mask_before_softmax):
-
-    input_shape = hidden_states.shape[:-1]
-    hidden_shape = (*input_shape, -1, module.head_dim)
-
-    query_states = module.q_norm(module.q_proj(hidden_states).view(hidden_shape))
-    key_states = module.k_norm(module.k_proj(hidden_states).view(hidden_shape))
-    value_states = module.v_proj(hidden_states)
-
-    query_states = query_states.transpose(1, 2)
-    key_states = key_states.transpose(1, 2)
-    value_states = value_states.view(hidden_shape).transpose(1, 2)
-
-    cos, sin = position_embeddings
-    query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
-
-    # Compute attention output and weights with masking
-    attn_output, attn_weights = eager_attention_forward(
-    module,
-    query_states,
-    key_states,
-    value_states,
-    attention_mask,
-    scaling=module.scaling,
-    custom_mask=mask,
-    mask_before_softmax=mask_before_softmax,
-    )
-    
-    # Reshape attention output back to [batch, seq_len, hidden_dim]
-    attn_output = attn_output.reshape(*input_shape, -1).contiguous()
-    attn_output = module.o_proj(attn_output)
-    return attn_output, attn_weights
-
-# todo: same as Mistral -> fuse them in the same function
-def Qwen3Decoder_masked(
-    module,
-    hidden_states,
-    attention_mask,
-    position_embeddings,
-    graph_attn_mask,
-    mask_before_softmax,
-    graph_mlp_mask,
-    attn_residual_mask,
-    mlp_residual_mask):
-
-    hidden_dtype = hidden_states.dtype
-    residual = hidden_states
-
-    # in Qwen3, the attention LN is applied at the input of the attention
-    hidden_states = module.input_layernorm(hidden_states)
-
-    hidden_states, _ = Qwen3Attention_masked(
-        module.self_attn,
-        hidden_states,
-        position_embeddings,
-        attention_mask,
-        graph_attn_mask,
-        mask_before_softmax)
-    
-    # Apply attention residual mask if provided
-    if attn_residual_mask is not None:
-        residual = torch.einsum('bsd,s->bsd', residual, attn_residual_mask.to(residual.device))
-    # Add residual connection after attention
-    hidden_states = residual + hidden_states
-
-    # Fully Connected
-    residual = hidden_states
-
-    # in Qwen3, the mlp LN is applied at the input of the MLP
-    hidden_states = module.post_attention_layernorm(hidden_states)
-
-    hidden_states = MLP_masked(module, hidden_states, graph_mlp_mask)
-
-    # Apply MLP residual mask if provided
-    if mlp_residual_mask is not None:
-        residual = torch.einsum('bsd,s->bsd', residual, mlp_residual_mask.to(residual.device))
-
-    hidden_states = residual + hidden_states
-
-    # Restore original dtype
-    hidden_states = hidden_states.to(hidden_dtype)
-
-    return hidden_states
-
-class Qwen3_Hooked(LLM_Hooked):
+class Qwen_Hooked(LLM_Hooked):
     def __init__(self, hf_model_name, half_precision, untrained=False):
         super().__init__(hf_model_name, half_precision, untrained)
 
@@ -150,8 +58,8 @@ class Qwen3_Hooked(LLM_Hooked):
         # Confidence: 95% - Correctly checks for 'olmo2' model type.
         # Load the model configuration
         config = AutoConfig.from_pretrained(self.model_name)
-        if config.model_type != "qwen3":
-            AssertionError(f"This architecture is not supported yet (expected 'qwen3', got '{config.model_type}')")
+        if "qwen" not in config.model_type:
+            AssertionError(f"This architecture is not supported yet (expected 'qwen', got '{config.model_type}')")
         print(config)
 
         # Load the tokenizer and configure padding
@@ -252,14 +160,166 @@ class Qwen3_Hooked(LLM_Hooked):
         linearized_RMS = linearize_rms_norm(final_rms_norm, input_tensor)
         return linearized_RMS
     
-    def decoder_masked(self, decoder_input, graph_masks):
-        return Qwen3Decoder_masked(*(decoder_input + graph_masks))
+    def attention_masked(
+        self,
+        module,
+        hidden_states,
+        position_embeddings,
+        attention_mask,
+        mask,
+        mask_before_softmax):
+        raise NotImplementedError("Subclasses should implement this method.")
+        
+    # todo: same as Mistral -> fuse them in the same function
+    def qwen_decoder_masked(
+        self,
+        module,
+        hidden_states,
+        attention_mask,
+        position_embeddings,
+        graph_attn_mask,
+        mask_before_softmax,
+        graph_mlp_mask,
+        attn_residual_mask,
+        mlp_residual_mask):
+        
+        hidden_dtype = hidden_states.dtype
+        residual = hidden_states
 
-    # def get_post_mlp_norm(self, layer_idx):
-    #     return self.get_layers()[layer_idx].post_feedforward_layernorm
-    
-    # def get_post_attn_norm(self, layer_idx):
-    #     return self.get_layers()[layer_idx].post_attention_layernorm
+        # in Qwen 2 and 3, the attention LN is applied at the input of the attention
+        hidden_states = module.input_layernorm(hidden_states)
+
+        hidden_states, _ = self.attention_masked(
+            module.self_attn,
+            hidden_states,
+            position_embeddings,
+            attention_mask,
+            graph_attn_mask,
+            mask_before_softmax)
+        
+        # Apply attention residual mask if provided
+        if attn_residual_mask is not None:
+            residual = torch.einsum('bsd,s->bsd', residual, attn_residual_mask.to(residual.device))
+        # Add residual connection after attention
+        hidden_states = residual + hidden_states
+
+        # Fully Connected
+        residual = hidden_states
+
+        # in Qwen3, the mlp LN is applied at the input of the MLP
+        hidden_states = module.post_attention_layernorm(hidden_states)
+
+        hidden_states = MLP_masked(module, hidden_states, graph_mlp_mask)
+
+        # Apply MLP residual mask if provided
+        if mlp_residual_mask is not None:
+            residual = torch.einsum('bsd,s->bsd', residual, mlp_residual_mask.to(residual.device))
+
+        hidden_states = residual + hidden_states
+
+        # Restore original dtype
+        hidden_states = hidden_states.to(hidden_dtype)
+
+        return hidden_states
+
+
+    def decoder_masked(self, decoder_input, graph_masks):
+        return self.qwen_decoder_masked(*(decoder_input + graph_masks))
 
     def get_final_norm(self):
         return self.model.model.norm
+    
+class Qwen3_Hooked(Qwen_Hooked):
+    def __init__(self, hf_model_name, half_precision, untrained=False):
+        super().__init__(hf_model_name, half_precision, untrained)
+
+    # same as Olmo2 -> fuse them into the same "attention_kqnorm" function
+    # wait no... a small difference in when to reshape q and k (after or before norm)
+    def attention_masked(
+        self,
+        module,
+        hidden_states,
+        position_embeddings,
+        attention_mask,
+        mask,
+        mask_before_softmax):
+
+        input_shape = hidden_states.shape[:-1]
+        hidden_shape = (*input_shape, -1, module.head_dim)
+
+        query_states = module.q_norm(module.q_proj(hidden_states).view(hidden_shape))
+        key_states = module.k_norm(module.k_proj(hidden_states).view(hidden_shape))
+        value_states = module.v_proj(hidden_states)
+
+        query_states = query_states.transpose(1, 2)
+        key_states = key_states.transpose(1, 2)
+        value_states = value_states.view(hidden_shape).transpose(1, 2)
+
+        cos, sin = position_embeddings
+        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+
+        # Compute attention output and weights with masking
+        attn_output, attn_weights = eager_attention_forward(
+        module,
+        query_states,
+        key_states,
+        value_states,
+        attention_mask,
+        scaling=module.scaling,
+        custom_mask=mask,
+        mask_before_softmax=mask_before_softmax,
+        )
+        
+        # Reshape attention output back to [batch, seq_len, hidden_dim]
+        attn_output = attn_output.reshape(*input_shape, -1).contiguous()
+        attn_output = module.o_proj(attn_output)
+        return attn_output, attn_weights
+
+class Qwen2_Hooked(Qwen_Hooked):
+    """
+    qwen2, qwen2.5
+    """
+    def __init__(self, hf_model_name, half_precision, untrained=False):
+        super().__init__(hf_model_name, half_precision, untrained)
+
+    
+    # Same as Mistral :> merge?
+    def attention_masked(
+        self,
+        module,
+        hidden_states,
+        position_embeddings,
+        attention_mask,
+        mask,
+        mask_before_softmax):
+
+        input_shape = hidden_states.shape[:-1]
+        hidden_shape = (*input_shape, -1, module.head_dim)
+
+        query_states = module.q_proj(hidden_states)
+        key_states = module.k_proj(hidden_states)
+        value_states = module.v_proj(hidden_states)
+
+        query_states = query_states.view(hidden_shape).transpose(1, 2)
+        key_states = key_states.view(hidden_shape).transpose(1, 2)
+        value_states = value_states.view(hidden_shape).transpose(1, 2)
+
+        cos, sin = position_embeddings
+        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+
+        # Compute attention output and weights with masking
+        attn_output, attn_weights = eager_attention_forward(
+        module,
+        query_states,
+        key_states,
+        value_states,
+        attention_mask,
+        scaling=module.scaling,
+        custom_mask=mask,
+        mask_before_softmax=mask_before_softmax,
+        )
+        
+        # Reshape attention output back to [batch, seq_len, hidden_dim]
+        attn_output = attn_output.reshape(*input_shape, -1).contiguous()
+        attn_output = module.o_proj(attn_output)
+        return attn_output, attn_weights
