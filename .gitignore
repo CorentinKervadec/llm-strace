@@ -49,6 +49,8 @@ logs/
 
 slurm-*.out
 
+WORKBENCH.sh
+
 # 4. Generated Data & Output
 
 # --------------------------------
