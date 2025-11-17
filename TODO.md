@@ -23,3 +23,6 @@
 ## Scaling up
 - [ ] Implement a one-layer-at-a-time forward pass for extraction and evaluation in order to support for larger model size.
 - [ ] Implement a strategy to allows larger context size 
+
+## Others
+- [ ] The reconstruct tolerance is too high (in sanity check)
