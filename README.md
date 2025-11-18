@@ -43,7 +43,7 @@ The project is split into the core library (`src/`) and a set of executable scri
 
 1. Clone the repository:
 ```
-git clone [https://github.com/your-username/llm-strace.git](https://github.com/your-username/llm-strace.git)
+git clone https://github.com/CorentinKervadec/llm-strace.git
 cd llm-strace
 ```
 2. Create a virtual environment and install dependencies:
