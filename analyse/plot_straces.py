@@ -64,7 +64,6 @@ def load_and_aggregate_data(results_dir: str):
                             all_data[full_key].append(data[key].item()[mode][sub_mode])
                         except KeyError:
                             print(f"Warning: Key {key}[{mode}][{sub_mode}] not found in {f_path}")
-
         except Exception as e:
             print(f"Warning: Could not load or process file {f_path}. Error: {e}")
             continue
@@ -177,53 +176,6 @@ def plot_results(static_data, aggregated_data, output_pdf):
                 pdf.savefig(fig)
                 plt.close(fig)
 
-        # --- 3. NEW PLOTS: Relative Size vs. Full Model Loss/Entropy ---
-        
-        # Find the index of the full model (where rel_size is max)
-        # We use argmax which is safer than checking for == 1.0
-        try:
-            full_model_idx = np.argmax(aggregated_data['mean_rel_size'])
-            y_data = aggregated_data['mean_rel_size']
-
-            # --- Plot 10: Rel Size vs Full Loss ---
-            # Get the full model loss (using 'trace' 'only' as the reference)
-            full_loss_list = aggregated_data.get('mean_strata_loss_trace_only')
-            if full_loss_list is not None:
-                full_loss_value = full_loss_list[full_model_idx]
-                
-                fig, ax = plt.subplots(figsize=(10, 7))
-                ax.plot([full_loss_value] * len(y_data), y_data, marker='o', linestyle='--', color='darkcyan', label='Stratum Points')
-                ax.axvline(x=full_loss_value, color='darkcyan', linestyle=':', label=f'Full Model Loss = {full_loss_value:.4f}')
-                
-                ax.set_title('Stratum Relative Size vs. Full Model Loss')
-                ax.set_xlabel('Reconstruction Loss')
-                ax.set_ylabel('Relative Stratum Size')
-                ax.legend()
-                ax.grid(True, linestyle='--', alpha=0.6)
-                pdf.savefig(fig)
-                plt.close(fig)
-            else:
-                print("Warning: Could not plot Full Model Loss (data not found).")
-
-            # --- Plot 11: Rel Size vs Full Entropy ---
-            # Get the full model entropy (using 'trace' 'only' as the reference)
-            full_entropy_list = aggregated_data.get('mean_strata_entropy_trace_only')
-            if full_entropy_list is not None:
-                full_entropy_value = full_entropy_list[full_model_idx]
-
-                fig, ax = plt.subplots(figsize=(10, 7))
-                ax.plot([full_entropy_value] * len(y_data), y_data, marker='o', linestyle='--', color='darkmagenta', label='Stratum Points')
-                ax.axvline(x=full_entropy_value, color='darkmagenta', linestyle=':', label=f'Full Model Entropy = {full_entropy_value:.4f}')
-
-                ax.set_title('Stratum Relative Size vs. Full Model Entropy')
-                ax.set_xlabel('Reconstruction Entropy')
-                ax.set_ylabel('Relative Stratum Size')
-                ax.legend()
-                ax.grid(True, linestyle='--', alpha=0.6)
-                pdf.savefig(fig)
-                plt.close(fig)
-            else:
-                print("Warning: Could not plot Full Model Entropy (data not found).")
         
         except Exception as e:
             print(f"Error creating full model plots: {e}")
