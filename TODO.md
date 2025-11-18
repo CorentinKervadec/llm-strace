@@ -16,6 +16,8 @@
 - [ ] Qwen 2 and 2.5: unstable, often raise reconstruction errors
 - [ ] OLMO 2: 7B failed (nothing ran)
 - [ ] Qwen 3: 1.7B and 8B failed. Looks like the model's output is wrong (0.6B and 4B worked fine)
+- [ ] Qwen 2: 1.5B and 7B failed. Loss and/or entropy is not finite.
+- [ ] Qwen 2.5: 1.5B and 7B failed. (same as above)
 
 ## Analyse Scripts
 - [ ] Plot all models on the same plot
