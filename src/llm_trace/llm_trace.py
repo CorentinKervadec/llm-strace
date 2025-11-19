@@ -206,8 +206,8 @@ class LLM_STRACE:
         original_logits = self.graph.populate_graph_with_importance(batch_size)
         self.original_logits = original_logits
         stats = self.graph.get_edge_weight_stats()
-        for (k,s) in stats.items():
-            print(f"[STRACE][GRAPH STATS] {k}: {s}")
+        # for (k,s) in stats.items():
+        #     print(f"[STRACE][GRAPH STATS] {k}: {s}")
 
     def label_graph_with_stratum(self, initial_graph: LLM_Graph_NX, tau: float, stratum_index: int, mode: str):
         """
@@ -529,12 +529,14 @@ class LLM_STRACE:
             print(f"{stratum:<5}{c_in_str:<10}{threshold:<25.3e}{rel_size:<15.0%}{raw_size:<15.2e}{tv:<15.2e}{nu:<15}{top5_nucleus_str:<25}{inv_nu:<15}{inv_top5_nucleus_str:<25}{r_nu:<15}{r_inv_nu:<15}")
 
 
-    def compute_stratum_reconstruction_error(self):
+    def compute_stratum_reconstruction_error(self, do_random=True, do_inverse=True):
         output = self.llm_hooked.forward_with_graph(self.input_tuple, self.graph, inverse=False, keep_residual=False, output_logit=True)  
         full_logits = output[4]
         # full_logits = self.original_logits
         for i, stratum_index in tqdm(enumerate(self.strata_index), desc=f"[STRACE] Evaluating strata"):
             for random in [False, True]:
+                if not do_random and random: # skip random
+                    continue
                 if random:
                     stratum_size = self.strata_raw_size[i]
                     stratum = self.graph.get_random_connected_subgraph(stratum_size)
@@ -545,6 +547,8 @@ class LLM_STRACE:
                     stratum = nx.subgraph_view(self.graph, filter_edge=filter_edges)
 
                 for inverse in [True, False]:
+                    if not do_inverse and inverse: # skip inverse
+                        continue
                     keep_residual = True if (inverse or random) else False # In case of inverse pruning, we keep the residual
                     unique_stratum_index = list(set(nx.get_edge_attributes(self.graph, 'stratum').values()))
                     output = self.llm_hooked.forward_with_graph(self.input_tuple, stratum, inverse=inverse, keep_residual=keep_residual, output_logit=True)  
