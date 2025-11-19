@@ -62,6 +62,8 @@ WORKBENCH.sh
 # Ignore all generated plots and reports
 
 *.pdf
+*.html
+*.tsv
 
 # 5. Generated Directories (Whitelist Strategy)
 
