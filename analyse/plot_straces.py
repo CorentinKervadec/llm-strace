@@ -175,12 +175,6 @@ def plot_results(static_data, aggregated_data, output_pdf):
                 
                 pdf.savefig(fig)
                 plt.close(fig)
-
-        
-        except Exception as e:
-            print(f"Error creating full model plots: {e}")
-
-
     print("Successfully saved PDF.")
 
 def main():

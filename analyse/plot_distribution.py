@@ -199,6 +199,15 @@ def main():
     
     for model_path in sorted(model_dirs):
         model_name = os.path.basename(model_path)
+
+        if "stage" in model_name:
+            continue #skip intermediate checkpoints
+
+        match = re.search(r'[-_]?(\d+\.?\d*)B[-_]?', model_name, re.IGNORECASE)
+        model_size = float(match[1])
+        if model_size > 2:
+            continue # skip large models
+
         print(f"\nProcessing model: {model_name}")
         
         # 1. Load and aggregate all weights for the model

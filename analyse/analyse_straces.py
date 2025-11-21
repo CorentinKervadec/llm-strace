@@ -216,9 +216,6 @@ def main():
     parser.add_argument('--pdf_name', type=str, required=True, help='Name of the output pdf.')
     args = parser.parse_args()
 
-    # count_file = "olmo2_1B_token_counts.tsv"
-    # count_file = "mistral_7B_token_counts.tsv"
-
     sentence_data = load_and_aggregate_data(args.result_dir, args.count_file)
     
     plot_regression_and_correlation(sentence_data, args.pdf_name)

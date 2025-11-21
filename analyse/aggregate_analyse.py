@@ -107,8 +107,8 @@ def load_model_data(model_dir, count_file_path=None):
             sort_idx = np.argsort(rel_size)
             size_sorted = np.array(rel_size)[sort_idx]
             
-            # Store average relative size for X-axis in scatter plot
-            sentence_data['avg_rel_size'].append(np.mean(size_sorted))
+            # # Store average relative size for X-axis in scatter plot
+            # sentence_data['avg_rel_size'].append(np.mean(size_sorted))
             
             # 1. Calculate AUCs for metrics
             for key in metric_keys:
@@ -132,7 +132,8 @@ def load_model_data(model_dir, count_file_path=None):
             
             s_loss = data["strata_loss"].item()['trace']['only'][full_idx]
             s_entropy = data["strata_entropy"].item()['trace']['only'][full_idx]
-            
+            # print('loss', data["strata_loss"].item()['trace']['only'])
+            # print('entropy', data["strata_entropy"].item()['trace']['only'])
             sentence_data["loss"].append(s_loss)
             sentence_data["entropy"].append(s_entropy)
 
@@ -150,7 +151,7 @@ def load_model_data(model_dir, count_file_path=None):
 
     n_valid = np.sum(np.isfinite(sentence_data["loss"]) & np.isfinite(sentence_data["entropy"]))
     if n_valid < 666: 
-        print(f"... Only {n_valid} loss & entropy: skipping.")
+        print(f"... Only {n_valid} valid loss & entropy: skipping.")
         return None # model not valid
             
     return sentence_data
@@ -445,6 +446,13 @@ def main():
     print(f"Found {len(model_dirs)} directories. Processing...")
 
     for model_name in sorted(model_dirs):
+
+        if "stage" in model_name:
+            continue # skip intermediate training checkpoints
+
+        if model_name != "Qwen2-1.5B":
+            continue
+
         full_path = os.path.join(args.base_result_dir, model_name, args.dir)
         
         # Try to find a token count file if a directory was provided
