@@ -6,6 +6,7 @@ from transformers import AutoConfig
 from typing import Callable
 import torch
 import src.llm_hooked.sanity_checks as sanity_check
+from safetensors import SafetensorError
 
 
 ATTENTION_MASK_VALUE = -65504
@@ -111,6 +112,10 @@ def Olmo2Decoder_masked(
 
 class Olmo2_Hooked(LLM_Hooked):
     def __init__(self, hf_model_name, half_precision, untrained=False):
+        if 'stage' in hf_model_name:
+            hf_model_name, self.training_step = hf_model_name.split('_')
+        else:
+            self.training_step = 'main'
         super().__init__(hf_model_name, half_precision, untrained)
 
     def get_architecture_type(self):
@@ -155,6 +160,7 @@ class Olmo2_Hooked(LLM_Hooked):
 
     def load_model_from_hf(self):
         # Confidence: 95% - Correctly checks for 'olmo2' model type.
+
         # Load the model configuration
         config = AutoConfig.from_pretrained(self.model_name)
         if config.model_type != "olmo2":
@@ -171,13 +177,27 @@ class Olmo2_Hooked(LLM_Hooked):
         if self.untrained:
             model =  AutoModelForCausalLM.from_config(config)
         else:
-            model = AutoModelForCausalLM.from_pretrained(
-                self.model_name,
-                attn_implementation="eager", # Use eager for easier hooking
-                output_hidden_states=True,
-                output_attentions=False,
-                device_map="auto",
-                torch_dtype=torch.float16 if self.half_precision else torch.float32,)
+            try:
+                model = AutoModelForCausalLM.from_pretrained(
+                    self.model_name,
+                    attn_implementation="eager", # Use eager for easier hooking
+                    output_hidden_states=True,
+                    output_attentions=False,
+                    device_map="auto",
+                    torch_dtype=torch.float16 if self.half_precision else torch.float32,
+                    revision=self.training_step,)
+            except SafetensorError as e:
+                print(f"Caught a Safetensor error: {e}")
+                print("The file header is likely corrupt or invalid. Retry with force_download")
+                model = AutoModelForCausalLM.from_pretrained(
+                    self.model_name,
+                    attn_implementation="eager", # Use eager for easier hooking
+                    output_hidden_states=True,
+                    output_attentions=False,
+                    device_map="auto",
+                    torch_dtype=torch.float16 if self.half_precision else torch.float32,
+                    revision=self.training_step,
+                    force_download=True)
         return config, tokenizer, model
 
     def register_value_hook(self, layer_i):
