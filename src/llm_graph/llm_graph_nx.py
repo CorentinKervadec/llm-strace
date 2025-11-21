@@ -270,7 +270,9 @@ class LLM_Graph_NX(nx.MultiDiGraph):
 
         elif self.importance_mode == 'norm':
             edge_norm = torch.norm(edge_vectors, p=distance_norm, dim=1)
+            # print('norm', edge_norm)
             importance = edge_norm / edge_norm.sum()
+            # print('importance', importance)
         
         elif self.importance_mode == 'random':
             n_edges = edge_vectors.shape[0]
@@ -500,6 +502,12 @@ class LLM_Graph_NX(nx.MultiDiGraph):
                     post_mlp_norm = post_mlp_norms_linear[layer][token]
                     mlp_out = torch.einsum('j,j->j', post_mlp_norm, mlp_out.to(post_mlp_norm.device)).cpu()
                 after_mlp = residual_stream[layer + 1][token].detach() # len(residual_stream)=n_layers+1 because it includes the input_embeddings
+
+                # if layer==0:
+                #     print('head_out.shape', head_out.shape)
+                #     if not all(torch.isfinite(attn_out)):
+                #         for head_2 in range(n_heads):
+                #             print(f'head_out/{head_2}', torch.isnan(head_out[:, head_2]).sum())
 
                 if self.llm_hooked.test_mode:
                     # Sanity check: verify (before_attn + attn_out) ≈ (after_mlp - mlp_out)

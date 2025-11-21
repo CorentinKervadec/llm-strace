@@ -206,8 +206,8 @@ class LLM_STRACE:
         original_logits = self.graph.populate_graph_with_importance(batch_size)
         self.original_logits = original_logits
         stats = self.graph.get_edge_weight_stats()
-        # for (k,s) in stats.items():
-        #     print(f"[STRACE][GRAPH STATS] {k}: {s}")
+        for (k,s) in stats.items():
+            print(f"[STRACE][GRAPH STATS] {k}: {s}")
 
     def label_graph_with_stratum(self, initial_graph: LLM_Graph_NX, tau: float, stratum_index: int, mode: str):
         """
@@ -529,7 +529,7 @@ class LLM_STRACE:
             print(f"{stratum:<5}{c_in_str:<10}{threshold:<25.3e}{rel_size:<15.0%}{raw_size:<15.2e}{tv:<15.2e}{nu:<15}{top5_nucleus_str:<25}{inv_nu:<15}{inv_top5_nucleus_str:<25}{r_nu:<15}{r_inv_nu:<15}")
 
 
-    def compute_stratum_reconstruction_error(self, do_random=True, do_inverse=True):
+    def compute_stratum_reconstruction_error(self, do_random=False, do_inverse=False):
         output = self.llm_hooked.forward_with_graph(self.input_tuple, self.graph, inverse=False, keep_residual=False, output_logit=True)  
         full_logits = output[4]
         # full_logits = self.original_logits

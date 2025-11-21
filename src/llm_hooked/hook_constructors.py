@@ -25,7 +25,7 @@ HOOKED_CONSTRUCTOR = {
 }
 
 def get_hooked_constructor(model_name):
-    if model_name in HOOKED_CONSTRUCTOR:
-        return HOOKED_CONSTRUCTOR[model_name]
-    else:
-        raise NotImplementedError(f"LLM_Hooked not implemented for model {model_name}.")
+    for key_model, constructor in HOOKED_CONSTRUCTOR.items():
+        if model_name.startswith(key_model):
+            return constructor
+    raise NotImplementedError(f"LLM_Hooked not implemented for model {model_name}.")
