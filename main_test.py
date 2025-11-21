@@ -201,11 +201,14 @@ def main(model_name):
         # It also reproduce the ablation with random graph extraction
         # and *inverse* ablation (masking the components that belongs to the subgraph).
         start_time = time.time()
-        strace.compute_stratum_reconstruction_error()
+        strace.compute_stratum_reconstruction_error(do_random=True, do_inverse=True)
         print(f"[MAIN]   Time to compute stratum reco error: {time.time() - start_time:.2f} s")
 
         # --- 4d. Display Results ---
         strace.print_graph_sizes_and_thresholds()
+
+        print("\n----------- Entropy -----------")
+        print(strace.strata_entropy)
     
 if __name__ == "__main__":
     """
@@ -231,7 +234,12 @@ if __name__ == "__main__":
     # Parse the arguments provided by the user
     args = parser.parse_args()
 
-    if args.model_name not in AVAILABLE_MODELS:
+    model_is_valid = False
+    for key_model in AVAILABLE_MODELS:
+        if args.model_name.startswith(key_model):
+            model_is_valid = True
+            break
+    if not model_is_valid:
         raise NotImplementedError(f"LLM_STRACE not implemented for model {args.model_name}.")
 
     # Call the main function, passing in the parsed model name
