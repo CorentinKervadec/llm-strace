@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1               # Run a single task
 #SBATCH --cpus-per-task=4        # Number of CPU cores per task
 #SBATCH --mem=64G                # Job memory request
-#SBATCH --time=15:00:00          # Time limit (2 hours, adjust for 100 sentences)
+#SBATCH --time=24:00:00          # Time limit (2 hours, adjust for 100 sentences)
 #SBATCH --gpus=1                 # Request 1 GPU
 #SBATCH --partition=alien
 #SBATCH --qos=alien
@@ -35,8 +35,9 @@ source activate unnatural_prompt
 ################## R U N ##################
 
 # Run the Python script
-python llm-strace/analyse/generate_colored_text.py --model_name "Qwen/Qwen3-4B-Base" --prompt "Continue the description of the weather today:\nThe sky is gray. Clouds drift overhead. Rain falls. The wind blows softly through the trees that line the street. Puddles form on the pavement that" --length 200 --output_prefix qwen3_4B_colored --context_length 40
-
+# python llm-strace/analyse/generate_colored_text.py --model_name "Qwen/Qwen3-4B-Base" --prompt "Continue the description of the weather today:\nThe sky is gray. Clouds drift overhead. Rain falls. The wind blows softly through the trees that line the street. Puddles form on the pavement that" --length 200 --output_prefix qwen3_4B_colored --context_length 40
+# python llm-strace/analyse/generate_colored_text.py --model_name "Qwen/Qwen3-4B-Base" --prompt "They walked along the winding river path, the sound of water rushing over smooth stones. Small green frogs jumped among the reeds at the water's edge. He carried a small, heavy backpack filled with all his necessary supplies. The journey was long and" --length 300 --output_prefix qwen3_4B_colored --context_length 40
+python llm-strace/analyse/generate_colored_text.py --model_name "Qwen/Qwen3-4B-Base" --prompt "The old wooden door creaked open, letting in a draft of cold, fresh air. She shivered slightly and stepped inside the abandoned house. A strange smell hung in the still air, like dust and old secrets. She wondered what she might find" --length 300 --output_prefix qwen3_4B_colored --context_length 40
 
 echo ''
 echo 'Run is over.'
