@@ -25,7 +25,7 @@ GRAPH_CONSTRUCTOR = {
 }
 
 def get_graph_constructor(model_name):
-    if model_name in GRAPH_CONSTRUCTOR:
-        return GRAPH_CONSTRUCTOR[model_name]
-    else:
-        raise NotImplementedError(f"LLM_Graph not implemented for model {model_name}.")
+    for key_model, constructor in GRAPH_CONSTRUCTOR.items():
+        if model_name.startswith(key_model):
+            return constructor
+    raise NotImplementedError(f"LLM_Graph not implemented for model {model_name}.")
