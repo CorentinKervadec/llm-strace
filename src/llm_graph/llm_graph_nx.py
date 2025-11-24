@@ -171,7 +171,7 @@ class LLM_Graph_NX(nx.MultiDiGraph):
 
     def get_edge_weight_stats(self):
         edges_weight = np.array([
-            d.get('weight')
+            d.get('weight').half()
             for u, v, k, d in self.edges(keys=True, data=True)
         ])
         stats = get_weight_stats(edges_weight)
