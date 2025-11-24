@@ -298,11 +298,10 @@ class LLM_Hooked():
             Wo.append(self.get_reshaped_attention_dense(layer_i, d_h_head, d_head))  # [head, hidden_dim, head_dim]
         Wo = torch.stack(Wo, dim=0)  # [layer, head, hidden_dim, head_dim]
 
+
         if self.half_precision:
             # Convert tensors to half precision for faster computation
-            value = value.half()
-            attn_weights = attn_weights.half()
-            Wo = Wo.half()
+            Wo = Wo.to(value.dtype)
 
         # Compute contributions of all source tokens to all target tokens for all heads in batches
         all_head_outputs = []
@@ -484,6 +483,7 @@ class LLM_Hooked():
                 y_batch_size=decompose_attention_batch_size,
                 x_batch_size=decompose_attention_batch_size,
             )
+
             # Add the batch dimension back to the output
             head_outputs = head_outputs.unsqueeze(0)
             # Transpose head outputs 
@@ -525,7 +525,7 @@ class LLM_Hooked():
     def decoder_masked(self, decoder_input, graph_masks):
         raise NotImplementedError("Subclasses should implement this method.")
 
-    def mask_decoder_hook(self, graph_attn_mask, mask_before_softmax, graph_mlp_mask, attn_residual_mask, mlp_residual_mask):
+    def mask_decoder_hook(self, graph_attn_mask, mask_before_softmax, graph_mlp_mask, attn_residual_mask, mlp_residual_mask, layer_index):
         """
         Creates a forward hook for a decoder block to apply custom masks during the forward pass.
 
@@ -542,11 +542,11 @@ class LLM_Hooked():
         # Note: might be inefficient beacuse it runs the forward 2 times: the normal one plus the masked one.
         with torch.no_grad():
             def fn(module, inputs, kwargs, output):
-
+                # print(kwargs.keys())
                 # Unpack the input arguments.
                 # Note: With with_kwargs=True, some arguments are in kwargs.
                 hidden_states = inputs[0]
-                position_embeddings = kwargs['position_embeddings']
+                position_embeddings = kwargs['position_embeddings'] if 'position_embeddings' in kwargs else kwargs['position_embeddings_global']
                 attention_mask = kwargs['attention_mask']  # shape [1, 1, seq, seq]
                 original_decoder_output = output[0]
 
@@ -562,8 +562,10 @@ class LLM_Hooked():
                     # Recompute the decoder output with all masks set to None (no masking)
                     sanity_masks = (None, None, None, None, None)
                     reconstruct_decoder_output = self.decoder_masked(decoder_input, sanity_masks)
+                    if isinstance(reconstruct_decoder_output, tuple):
+                        reconstruct_decoder_output = reconstruct_decoder_output[0]
                     sanity_check.sanity_check_decoder(original_decoder_output, reconstruct_decoder_output, self.half_precision)
-                    # print("[LLM Hooked] Decoder output reconstruction sanity check succesfully passed.")
+                    print(f"[LLM Hooked][Layer {layer_index}] Decoder output reconstruction sanity check succesfully passed.")
 
                 # Replace the original output with the masked output.
                 output = masked_decoder_outputs
@@ -760,7 +762,7 @@ class LLM_Hooked():
             # Prepare hook input arguments
             hook_input = (graph_attn_mask, mask_before_softmax, graph_mlp_mask, attn_residual_mask, mlp_residual_mask)
             # Register the forward hook on the decoder layer
-            handle = layer.register_forward_hook(self.mask_decoder_hook(*hook_input), with_kwargs=True)
+            handle = layer.register_forward_hook(self.mask_decoder_hook(*hook_input, layer_index), with_kwargs=True)
             # Save the hook handle for later removal
             self.masking_hook_handles.append(handle)
         return nb_non_masked_edges, total_nb_edges
