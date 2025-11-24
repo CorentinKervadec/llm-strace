@@ -159,6 +159,9 @@ class Olmo2_Hooked(LLM_Hooked):
         return self.config.num_attention_heads
 
     def load_model_from_hf(self):
+        """
+        Trained in float32
+        """
         # Confidence: 95% - Correctly checks for 'olmo2' model type.
 
         # Load the model configuration

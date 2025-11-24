@@ -55,6 +55,9 @@ class Qwen_Hooked(LLM_Hooked):
         return self.config.num_attention_heads
 
     def load_model_from_hf(self):
+        """
+        Qwen was trained in bfloat16 (not float16)
+        """
         # Confidence: 95% - Correctly checks for 'olmo2' model type.
         # Load the model configuration
         config = AutoConfig.from_pretrained(self.model_name)
@@ -78,7 +81,7 @@ class Qwen_Hooked(LLM_Hooked):
                 output_hidden_states=True,
                 output_attentions=False,
                 device_map="auto",
-                torch_dtype=torch.float16 if self.half_precision else torch.float32,)
+                torch_dtype=torch.bfloat16 if self.half_precision else torch.float32,)
         return config, tokenizer, model
 
     def register_value_hook(self, layer_i):
@@ -101,6 +104,7 @@ class Qwen_Hooked(LLM_Hooked):
                 input_shape = input[0].shape[:-1] # [batch, seq]
                 hidden_shape = (*input_shape, self.get_num_key_value_heads(), self.get_head_size()) # [batch, seq, num_kv_heads, head_dim]
                 value = output.view(hidden_shape).transpose(1, 2)  # [batch, num_kv_heads, seq, head_dim]
+                # print(f"[{layer_i}] value hook nan", value.isnan().sum())
                 # Repeat the value tensor to match the number of query heads
                 value = repeat_kv(value, self.get_nb_head_groups())
                 # value = value.repeat_interleave(self.get_nb_head_groups(), dim=1)  # [batch, num_attn_heads, seq, head_dim]
@@ -121,6 +125,7 @@ class Qwen_Hooked(LLM_Hooked):
                 # Unpack the output into attention output and attention weights
                 # Qwen3Attention.forward returns (attn_output, attn_weights)
                 attn_output, attn_weights = output
+                # print(f"[{layer_i}] attn_weights hook nan", attn_weights.isnan().sum())
                 # Cache the attention weights and output
                 self.caches['attention']['attn_weight'][layer_i] = attn_weights.detach()
                 self.caches['attention']['output'][layer_i] = attn_output.detach() # used for sanity check

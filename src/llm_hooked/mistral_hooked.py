@@ -171,6 +171,9 @@ class Mistral_Hooked(LLM_Hooked):
         return self.config.num_attention_heads
 
     def load_model_from_hf(self):
+        '''
+        Trained in bfloat16
+        '''
         # Load the model configuration
         config = AutoConfig.from_pretrained(self.model_name)
         if config.model_type != "mistral":
@@ -192,7 +195,7 @@ class Mistral_Hooked(LLM_Hooked):
                 output_hidden_states=True,
                 output_attentions=False,
                 device_map="auto",
-                torch_dtype=torch.float16 if self.half_precision else torch.float32,)
+                torch_dtype=torch.bfloat16 if self.half_precision else torch.float32,)
         return config, tokenizer, model
 
     def register_value_hook(self, layer_i):

@@ -28,8 +28,8 @@ def get_total_variation(original_logits, graph_logits):
         float: The total variation distance.
     """
     # Extract logits for the last token in the batch
-    orig_last = np.array(original_logits[0, -1].cpu())
-    graph_last = np.array(graph_logits[0, -1].cpu())
+    orig_last = np.array(original_logits[0, -1].cpu().float())
+    graph_last = np.array(graph_logits[0, -1].cpu().float())
 
     # Compute probability distributions (softmax)
     orig_probs = np.exp(orig_last - np.max(orig_last))
@@ -53,8 +53,8 @@ def get_intersection_nucleus(original_logits,graph_logits):
         shared_nucleus (int): The highest percentage p (from a set of candidates) for which the top-p nuclei (token indices covering p% of probability mass) are identical between the original and graph logits. Returns 0 if no such p is found.
         nucleus_size (int): The size of the nucleus (number of tokens) at the shared_nucleus percentage. Returns 0 if no shared nucleus is found.
     """
-    orig_last = np.array(original_logits[0, -1].cpu())
-    graph_last = np.array(graph_logits[0, -1].cpu())
+    orig_last = np.array(original_logits[0, -1].cpu().float())
+    graph_last = np.array(graph_logits[0, -1].cpu().float())
 
     # Compute probability distributions (softmax)
     orig_probs = np.exp(orig_last - np.max(orig_last))
