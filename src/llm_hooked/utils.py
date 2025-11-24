@@ -21,7 +21,8 @@ def linearize_rms_norm(rms_norm, input_tensor: torch.Tensor):
     eps = rms_norm.variance_epsilon 
 
     # Compute standard deviation from input
-    var = torch.var(input_tensor, dim=-1, unbiased=False)
+    var = torch.mean(input_tensor.pow(2), dim=-1) #
+    # var = torch.var(input_tensor, dim=-1, unbiased=False)
     inv_std = torch.rsqrt(var + eps).to(input_tensor.dtype)
     # Extract gamma (weight) RMSNorm
     weight = rms_norm.weight
@@ -62,6 +63,7 @@ def apply_rotary_pos_emb(q, k, cos, sin):
     k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
 
+
 def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     # copy/pasted from hugging face transormers
     """
@@ -74,8 +76,7 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
-
-def eager_attention_forward(module, query, key, value, attention_mask, scaling, custom_mask, mask_before_softmax, dropout=0.0):
+def eager_attention_forward(module, query, key, value, attention_mask, scaling, custom_mask, mask_before_softmax, dropout=0.0, softcap=None):
     """
     Forward pass for masked attention in Mistral and Olmo2 (and probably more).
 
@@ -101,6 +102,11 @@ def eager_attention_forward(module, query, key, value, attention_mask, scaling, 
 
     # Compute raw attention scores
     attn_weights = torch.matmul(query, key_states.transpose(2, 3)) * scaling
+
+    if softcap is not None:
+        attn_weights = attn_weights / softcap
+        attn_weights = torch.tanh(attn_weights)
+        attn_weights = attn_weights * softcap
 
     if attention_mask is not None:
         # Extract the causal mask for the current sequence length
