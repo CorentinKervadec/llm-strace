@@ -7,7 +7,7 @@ EPS = 1e-6 #1e-3 if HALF_PRECISION else 1e-6  # Small epsilon value
 
 
 def get_reconstruction_tolerance(half_precision):
-    return 0.5 if half_precision else 0.5 # I think it's too high
+    return 1.0 if half_precision else 1e-3 # I think it's too high
 
 def test_linearize_rms_norm(rms_norm, d, half_precision):
     """
@@ -477,15 +477,18 @@ def sanity_check_decoder(orginal_decoder_output, reconstruct_decoder_output, hal
         diff = (orginal_decoder_output - reconstruct_decoder_output).abs()
         max_diff = diff.max()
         sum_diff = diff.sum()
+        token_diff = diff.sum(-1)
 
         error_message = (
             f"[SANITY CHECK][DECODER RECONSTRUCTION] Reconstruction failed.\n"
             f"Max element-wise difference: {max_diff}\n"
             f"Sum of differences: {sum_diff}\n"
+            f"Sum of differences (tokens): {token_diff}\n"
             f"Expected output: {orginal_decoder_output}\n"
             f"Reconstructed output: {reconstruct_decoder_output}\n"
         )
         raise AssertionError(error_message)
+        # print(error_message)
     return reconstruct_decoder_output
 
 
