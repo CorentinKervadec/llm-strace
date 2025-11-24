@@ -61,12 +61,6 @@ def parse_olmo_checkpoint(model_dir_name):
         tokens = float(match.group(3))
         return stage, tokens, f"S{stage}-{tokens}B"
     
-    # Regex for just step/tokens if stage is missing (sometimes happens)
-    match_step = re.search(r'step(\d+)-tokens(\d+\.?\d*)B', name)
-    if match_step:
-        tokens = float(match_step.group(2))
-        return 1, tokens, f"S1-{tokens}B"
-
     # regex when the name also include the ingredient (likely for stage 2)
     match_ingredient = re.search(r'stage(\d+)-ingredient(\d+)-step(\d+)-tokens(\d+\.?\d*)B', name)
     if match_ingredient:
@@ -74,8 +68,13 @@ def parse_olmo_checkpoint(model_dir_name):
         ingredient = int(match_ingredient.group(2))
         step = int(match_ingredient.group(3))
         tokens = float(match_ingredient.group(4))
-
         return stage, tokens, f"Stage {stage} ({tokens}B)"
+
+    # Regex for just step/tokens if stage is missing (sometimes happens)
+    match_step = re.search(r'step(\d+)-tokens(\d+\.?\d*)B', name)
+    if match_step:
+        tokens = float(match_step.group(2))
+        return 1, tokens, f"S1-{tokens}B"
 
     # Base model (Final)
     if name == "OLMo-2-0425-1B" or name.endswith("OLMo-2-0425-1B"):
@@ -404,12 +403,12 @@ def plot_sentence_tv_evolution(all_model_traces, model_colors, sorted_models, ou
                     
                 # Data: (tv_array, size_array)
                 tv_data, size_data = all_model_traces[model_name][file_name]
-                print(tv_data)
                 
                 # Sort data by size
-                sort_idx = np.argsort(size_data)
+                sort_idx = list(np.argsort(size_data))
+                
                 size_sorted = size_data[sort_idx]
-                tv_sorted = tv_data[sort_idx]
+                tv_sorted = np.array(tv_data)[sort_idx]
 
                 color = model_colors[model_name]
                 _, _, display_name = parse_olmo_checkpoint(model_name)
