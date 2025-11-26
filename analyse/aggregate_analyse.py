@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from matplotlib.backends.backend_pdf import PdfPages
-from scipy.stats import pearsonr
+from scipy.stats import pearsonr, spearmanr
 import glob
 from collections import defaultdict
 import warnings
@@ -79,8 +79,8 @@ def load_model_data(model_dir, count_file_path=None):
 
     # Find all .npz files
     file_paths = glob.glob(os.path.join(model_dir, '*.npz'))
-    if len(file_paths) < 1000:
-        print(f"  Skipping {os.path.basename(model_dir)}: Not enough files ({len(file_paths)} < 1000)")
+    if len(file_paths) < 666:
+        print(f"  Skipping {os.path.basename(model_dir)}: Not enough files ({len(file_paths)} < 666)")
         return None
 
     print(f"  Loading {len(file_paths)} files from {os.path.basename(model_dir)}...")
@@ -92,7 +92,7 @@ def load_model_data(model_dir, count_file_path=None):
         total_count = sum(token_counts.values())
         norm_token_counts = {k: float(v)/total_count for k, v in token_counts.items()}
 
-    sentence_data = {'loss': [], 'entropy': [], 'pred_token_count': [], 'avg_rel_size': [], 'auc': {}}
+    sentence_data = {'loss': [], 'entropy': [], 'pred_token_count': [], 'avg_rel_size': [], 'auc': {}, 'id': []}
     
     metric_keys = ['strata_reco_tv', 'strata_reco_nu']
     eval_modes = ['trace']
@@ -122,7 +122,7 @@ def load_model_data(model_dir, count_file_path=None):
                         
                         # Compute AUC
                         metric_auc = np.trapz(metric_sorted, size_sorted)
-                        
+
                         if full_key not in sentence_data['auc']:
                             sentence_data['auc'][full_key] = []
                         sentence_data['auc'][full_key].append(metric_auc)
@@ -136,7 +136,9 @@ def load_model_data(model_dir, count_file_path=None):
             # print('entropy', data["strata_entropy"].item()['trace']['only'])
             sentence_data["loss"].append(s_loss)
             sentence_data["entropy"].append(s_entropy)
-
+            sentence_id = int(f_path.split('/')[-1].split('.')[0].split('_')[-1])
+            sentence_data["id"].append(sentence_id)
+            
             # 3. Calculate Token Count Frequency
             if norm_token_counts:
                 nucleus_60 = data["nucleus_60"].item()['trace']['only'][full_idx]
@@ -418,6 +420,117 @@ def plot_auc_distributions(all_models_data, output_pdf):
             pdf.savefig(fig)
             plt.close(fig)
 
+def plot_model_correlation_matrix(all_model_traces, output_pdf, significance_threshold=0.05):
+    """
+    Computes and plots the pairwise correlation matrix of TV AUC scores between all models.
+    Only displays correlation values text if the p-value is < significance_threshold.
+    """
+    print(f"Generating Model Correlation Matrix Plot -> {output_pdf}...")
+
+    # 1. Gather all common sentence AUCs
+    auc_data = defaultdict(lambda: defaultdict(float)) # model_name -> file_name -> auc_tv
+    common_sentences = None
+
+    for model_name, sentence_data in all_model_traces.items():
+        current_sentences = set(sentence_data['id'])
+        # remove sentences which have non-finite auc values
+        current_auc = np.array(sentence_data['auc']['strata_reco_tv_trace_only'])
+        finite_mask = np.isfinite(current_auc)
+        current_sentences = {sentence_data['id'][i] for i in np.where(finite_mask)[0]}
+        
+        if common_sentences is None:
+            common_sentences = current_sentences
+        else:
+            common_sentences = common_sentences.intersection(current_sentences)
+
+    for model_name, sentence_data in all_model_traces.items():
+        for i, sentence_id in enumerate(sentence_data['id']):
+            if sentence_id in common_sentences:
+                auc_data[model_name][sentence_id] = sentence_data['auc']['strata_reco_tv_trace_only'][i]
+
+    if not common_sentences:
+        print("No common sentence files found across all models. Cannot compute correlation.")
+        return
+    else:
+        print(f"Found {len(common_sentences)} common sentences to compute correlation.")
+
+    # 2. Build correlation AND p-value matrices
+    N = len(all_model_traces)
+    # Initialize matrices with identity (for corr) and zeros (for p-val, implying diagonal is significant)
+    matrices = {
+        'pearson': {'corr': np.eye(N), 'p': np.zeros((N, N))},
+        'spearman': {'corr': np.eye(N), 'p': np.zeros((N, N))}
+    }
+    
+    model_labels = list(all_model_traces.keys())
+    
+    # Extract AUC vectors for common files
+    auc_vectors = {}
+    for model_name in model_labels:
+        vector = np.array([auc_data[model_name][f] for f in common_sentences])
+        auc_vectors[model_name] = vector
+
+    # Calculate pairwise correlation
+    for i in range(N):
+        for j in range(i + 1, N):
+            model_i = model_labels[i]
+            model_j = model_labels[j]
+            
+            # Pearson
+            p_corr, p_val = pearsonr(auc_vectors[model_i], auc_vectors[model_j])
+            matrices['pearson']['corr'][i, j] = matrices['pearson']['corr'][j, i] = p_corr
+            matrices['pearson']['p'][i, j] = matrices['pearson']['p'][j, i] = p_val
+
+            # Spearman
+            s_corr, s_val = spearmanr(auc_vectors[model_i], auc_vectors[model_j])
+            matrices['spearman']['corr'][i, j] = matrices['spearman']['corr'][j, i] = s_corr
+            matrices['spearman']['p'][i, j] = matrices['spearman']['p'][j, i] = s_val
+
+    # 3. Plot the Heatmap
+    with PdfPages(output_pdf) as pdf:
+        for mode in ['pearson', 'spearman']:
+            fig, ax = plt.subplots(figsize=(12, 10))
+            
+            corr_matrix = matrices[mode]['corr']
+            p_matrix = matrices[mode]['p']
+
+            # We cap the color scale from 0.0 to 1.0
+            c = ax.imshow(corr_matrix, cmap='viridis', vmin=0.0, vmax=1.0) 
+
+            # Add correlation values to the cells
+            for i in range(N):
+                for j in range(N):
+                    val = corr_matrix[i, j]
+                    p_val = p_matrix[i, j]
+                    
+                    # Logic: Always print diagonal (i==j), otherwise check significance
+                    if i == j or p_val < significance_threshold:
+                        # Ensure text is readable, maybe white for dark colors
+                        color_text = 'white' if val > 0.9 else 'black' 
+                        text_content = f"{val:.3f}"
+                    else:
+                        # If not significant, print empty string (or "ns")
+                        text_content = "" 
+
+                    ax.text(j, i, text_content,
+                            ha="center", va="center", color=color_text, fontsize=8)
+
+            # Set labels and title
+            ax.set_xticks(np.arange(N))
+            ax.set_yticks(np.arange(N))
+            ax.set_xticklabels(model_labels, rotation=45, ha='right', fontsize=8)
+            ax.set_yticklabels(model_labels, fontsize=8)
+            ax.tick_params(top=False, bottom=True, labeltop=False, labelbottom=True)
+
+            ax.set_title(f"Pairwise {mode.capitalize()} Correlation of Sentence TV AUCs\n(Values hidden if p >= {significance_threshold})", pad=20)
+            
+            # Add a color bar
+            cbar = fig.colorbar(c, ax=ax, fraction=0.046, pad=0.04)
+            cbar.set_label(f'{mode.capitalize()} Correlation Coefficient (r)', rotation=-90, va="bottom")
+
+            plt.tight_layout()
+            pdf.savefig(fig)
+            plt.close(fig)
 
 # --- 3. Main ---
 
@@ -450,9 +563,6 @@ def main():
         if "stage" in model_name:
             continue # skip intermediate training checkpoints
 
-        if model_name != "Qwen2-1.5B":
-            continue
-
         full_path = os.path.join(args.base_result_dir, model_name, args.dir)
         
         # Try to find a token count file if a directory was provided
@@ -477,6 +587,7 @@ def main():
         return
 
     # Generate Plots
+    plot_model_correlation_matrix(all_models_data, f"{args.output_prefix}_auc_correlation.pdf")
     plot_auc_distributions(all_models_data, f"{args.output_prefix}_auc_distributions.pdf")
     plot_correlation_summary(all_models_data, f"{args.output_prefix}_correlations_summary.pdf")
     plot_model_size_scatter(all_models_data, f"{args.output_prefix}_model_size_comparison.pdf")
