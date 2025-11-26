@@ -30,8 +30,8 @@ def load_single_model_data(model_dir: str):
     static_data = {}
     
     metric_keys = ['strata_reco_tv', 'strata_reco_nu', 'strata_loss', 'strata_entropy']
-    eval_modes = ['trace', 'random']
-    sub_modes = ['only', 'inverse']
+    eval_modes = ['trace',]# 'random']
+    sub_modes = ['only',]#, 'inverse']
 
     for i, f_path in enumerate(file_paths):
         try:
@@ -219,6 +219,10 @@ def main():
 
     # 2. Load and aggregate data for each model
     for model_name in sorted(model_dirs):
+
+        if "stage" in model_name:
+            continue # skip intermediate training checkpoints
+
         model_dir_path = os.path.join(args.base_result_dir, model_name, args.dir)
         print(f"\n--- Loading data for model: {model_name} ---")
 

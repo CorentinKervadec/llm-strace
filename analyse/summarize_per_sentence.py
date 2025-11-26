@@ -185,6 +185,9 @@ def main():
 
     for model_path in sorted(model_dirs):
         model_name = os.path.basename(model_path)
+
+        if "stage" in model_name:
+            continue # skip intermediate training checkpoints
         
         sentence_metrics = load_model_data(model_name, os.path.join(model_path, args.dir), args.min_files)
         
