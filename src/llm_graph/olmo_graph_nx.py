@@ -10,6 +10,6 @@ class Olmo2_Graph_NX(LLM_Graph_NX):
             self,
             olmo_hooked: Optional[Olmo2_Hooked] = None, 
             input_sentence: Optional[str] = None, 
-            importance_mode: Optional[str] = 'dist',
+            importance_mode: Optional[str] = None,
             **attr):
         super().__init__(olmo_hooked, input_sentence, importance_mode, **attr)

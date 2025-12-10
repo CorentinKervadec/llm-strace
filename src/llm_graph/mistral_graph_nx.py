@@ -10,6 +10,6 @@ class Mistral_Graph_NX(LLM_Graph_NX):
             self,
             mistral_hooked: Optional[Mistral_Hooked] = None, 
             input_sentence: Optional[str] = None, 
-            importance_mode: Optional[str] = 'dist',
+            importance_mode: Optional[str] = None,
             **attr):
         super().__init__(mistral_hooked, input_sentence, importance_mode, **attr)

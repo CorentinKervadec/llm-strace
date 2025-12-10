@@ -10,6 +10,6 @@ class Qwen_Graph_NX(LLM_Graph_NX):
             self,
             qwen_hooked: Optional[Qwen_Hooked] = None, 
             input_sentence: Optional[str] = None, 
-            importance_mode: Optional[str] = 'dist',
+            importance_mode: Optional[str] = None,
             **attr):
         super().__init__(qwen_hooked, input_sentence, importance_mode, **attr)
