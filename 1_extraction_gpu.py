@@ -32,12 +32,13 @@ def main():
     parser.add_argument('--total_sentences', type=int, required=True, help='Total number of sentences in the dataset.')
     parser.add_argument('--data_file', type=str, required=True, help='Path to the sentences.jsonl file.')
     parser.add_argument('--intermediate_dir', type=str, required=True, help='Directory to save intermediate graphs.')
+    parser.add_argument('--importance', type=str, required=True, help='Importance mode')
     args = parser.parse_args()
 
     # --- Parameters ---
     half_precision = True
     untrained = False
-    importance_mode = 'norm'
+    importance_mode = args.importance
     batch_size = 8
 
     # --- Initialise Model (on GPU) - ONCE per job ---

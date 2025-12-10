@@ -27,6 +27,8 @@ source activate unnatural_prompt
 : "${STRACE_DIR:?STRACE_DIR not set}"
 : "${CHUNK_SIZE:?CHUNK_SIZE not set}"
 : "${TOTAL_SENTENCES:?TOTAL_SENTENCES not set}"
+: "${IMPORTANCE:?IMPORTANCE not set}"
+: "${STRACE:?STRACE not set}"
 
 # Run the CPU-bound Python script
 python 2_stratification_cpu.py \
@@ -34,7 +36,9 @@ python 2_stratification_cpu.py \
     --chunk_size $CHUNK_SIZE \
     --total_sentences $TOTAL_SENTENCES \
     --intermediate_dir $INTERMEDIATE_DIR \
-    --strace_dir $STRACE_DIR
+    --strace_dir $STRACE_DIR \
+    --importance $IMPORTANCE \
+    --strace $STRACE
 
 echo "--- Finished CPU Job Chunk $SLURM_ARRAY_TASK_ID ---"
 date

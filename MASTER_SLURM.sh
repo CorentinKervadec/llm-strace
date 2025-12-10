@@ -7,6 +7,9 @@
 #
 # Arguments:
 #   model_name:      (Required) e.g., "allenai/OLMo-2-0425-1B"
+#   importance:      (Required) e.g., "norm"
+#   strace:          (Required) e.g., "threshold"
+#   model_name:      (Required) e.g., "allenai/OLMo-2-0425-1B"
 #   sentence_length: (Required) e.g., 30
 #   nb_data:         (Required) e.g., 10000
 #   chunk_size:      (Required) e.g., 50
@@ -14,33 +17,37 @@
 #   end_stage:       (Optional) Stage to end on (1-4). Default: 4
 #
 # Example (Run all stages):
-#   ./submit_jobs.sh 30 10000 50 "allenai/OLMo-2-0425-1B"
+#   ./submit_jobs.sh norm threshold 30 10000 50 "allenai/OLMo-2-0425-1B"
 #
 # Example (Run only Stage 2 and 3):
-#   ./submit_jobs.sh 30 10000 50 "allenai/OLMo-2-0425-1B" 2 3
+#   ./submit_jobs.sh norm threshold 30 10000 50 "allenai/OLMo-2-0425-1B" 2 3
 #-----------------------------------------------------------------------
 
 set -e # Exit immediately if any command fails
 
 # --- 1. Input Validation ---
-if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ]; then
+if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ] || [ -z "$5" ] || [ -z "$6" ]; then
     echo "Error: Missing required arguments."
-    echo "Usage: $0 <model_name> <sentence_length> <nb_data> <chunk_size> [start_stage] [end_stage]"
+    echo "Usage: $0 <model_name> <importance> <threshold> <sentence_length> <nb_data> <chunk_size> [start_stage] [end_stage]"
     exit 1
 fi
 
 MODEL_NAME=$1
-SENTENCE_LENGTH=$2
-NB_DATA=$3
-CHUNK_SIZE=$4
-START_STAGE=${5:-1}  # Default to 1 if not provided
-END_STAGE=${6:-4}    # Default to 4 if not provided
+IMPORTANCE=$2
+STRACE=$3
+SENTENCE_LENGTH=$4
+NB_DATA=$5
+CHUNK_SIZE=$6
+START_STAGE=${7:-1}  # Default to 1 if not provided
+END_STAGE=${8:-4}    # Default to 4 if not provided
 
 MAX_CONCURRENT_JOBS=50 # Fairness: Don't run more than 50 jobs at once
 EXCLUDED_NODES="node044,node042"
 
 echo "--- Configuration ---"
 echo "Model Name: $MODEL_NAME"
+echo "Importance: $IMPORTANCE"
+echo "Strace: $STRACE"
 echo "Sentence Length: $SENTENCE_LENGTH"
 echo "NB Data: $NB_DATA"
 echo "Chunk Size: $CHUNK_SIZE"
@@ -88,13 +95,15 @@ echo "Slurm Array Range: $ARRAY_RANGE"
 
 # --- Directory and Data Configuration ---
 export MODEL_NAME=$MODEL_NAME
+export IMPORTANCE=$IMPORTANCE
+export STRACE=$STRACE
 export DATA_FILE=$DATASET_FILE
 export CHUNK_SIZE=$CHUNK_SIZE
 export TOTAL_SENTENCES=$TOTAL_SENTENCES
 
 # Define all directory paths
 # Define all directory paths with SANITIZED_MODEL_NAME
-BASE_OUTPUT_DIR="$(pwd)/results/${SANITIZED_MODEL_NAME}"
+BASE_OUTPUT_DIR="$(pwd)/results_${IMPORTANCE}_${STRACE}/${SANITIZED_MODEL_NAME}"
 export INTERMEDIATE_DIR="${BASE_OUTPUT_DIR}/intermediate_graphs_${SENTENCE_LENGTH}"
 export STRACE_DIR="${BASE_OUTPUT_DIR}/intermediate_straces_${SENTENCE_LENGTH}"
 export FINAL_DIR="${BASE_OUTPUT_DIR}/final_straces_${SENTENCE_LENGTH}"

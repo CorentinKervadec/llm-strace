@@ -33,6 +33,7 @@ source activate unnatural_prompt
 : "${CHUNK_SIZE:?CHUNK_SIZE not set}"
 : "${TOTAL_SENTENCES:?TOTAL_SENTENCES not set}"
 : "${MODEL_NAME:?MODEL_NAME not set}"
+: "${IMPORTANCE:?IMPORTANCE not set}"
 
 # Run the GPU-bound Python script
 python 1_extraction_gpu.py \
@@ -41,7 +42,8 @@ python 1_extraction_gpu.py \
     --chunk_size $CHUNK_SIZE \
     --total_sentences $TOTAL_SENTENCES \
     --data_file $DATA_FILE \
-    --intermediate_dir $INTERMEDIATE_DIR
+    --intermediate_dir $INTERMEDIATE_DIR \
+    --importance $IMPORTANCE
 
 echo "--- Finished GPU Job Chunk $SLURM_ARRAY_TASK_ID ---"
 date
