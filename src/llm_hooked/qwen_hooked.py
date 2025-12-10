@@ -1,5 +1,5 @@
 from src.llm_hooked.llm_hooked import LLM_Hooked
-from src.llm_hooked.utils import linearize_rms_norm, apply_rotary_pos_emb, eager_attention_forward, MLP_masked, repeat_kv
+from src.llm_hooked.utils import linearize_rms_norm, apply_rotary_pos_emb, eager_attention_forward, MLP_masked, repeat_kv, get_real_weight_from_offloaded_module
 from transformers import AutoModelForCausalLM
 from transformers import AutoTokenizer
 from transformers import AutoConfig
@@ -21,16 +21,17 @@ class Qwen_Hooked(LLM_Hooked):
         return self.model.model.layers
 
     def get_attention_dense_layers(self):
-        # Confidence: 99% - Correct path to o_proj.
-        return [layer.self_attn.o_proj for layer in self.get_layers()]
+        return [get_real_weight_from_offloaded_module(layer.self_attn.o_proj) for layer in self.get_layers()]
 
+    def get_attention_dense_layer_i(self, layer_i):
+        module = self.get_layers()[layer_i].self_attn.o_proj
+        return get_real_weight_from_offloaded_module(module)
+    
     def get_reshaped_attention_dense(self, layer_i, d_h_head, d_head):
-        # TO CHECK
-        # Confidence: 95% - Logic is model-agnostic and correct for o_proj.
         """
         should be reshaped to [head, hidden_dim, head_dim]
         """
-        dense_layer = self.get_attention_dense_layers()[layer_i].weight  # [hidden_dim, hidden_dim]
+        dense_layer = self.get_attention_dense_layer_i(layer_i)  # [hidden_dim, hidden_dim]
         Wo_h = [
             dense_layer[:, h_i * d_h_head: (h_i + 1) * d_h_head]  # [hidden_dim, head_dim]
             for h_i in range(d_head)
