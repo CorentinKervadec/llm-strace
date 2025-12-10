@@ -1,6 +1,33 @@
 import torch
 from torch import nn
 
+import torch
+
+def get_real_weight_from_offloaded_module(submodule):
+    """
+    Safely extracts weights from a layer that might be offloaded (Meta device)
+    by manually triggering its specific Accelerate hook.
+    """
+    # 1. Trigger the hook: "Load this specific layer's data from Disk/RAM to GPU"
+    #    We check if the hook exists because some layers might already be on GPU.
+    if hasattr(submodule, "_hf_hook"):
+        submodule._hf_hook.pre_forward(submodule)
+
+    # 2. Extract the weight
+    #    Now that pre_forward has run, submodule.weight should be on the GPU (or CPU RAM), not Meta.
+    #    We immediately move it to CPU to avoid filling up VRAM.
+    with torch.no_grad():
+        # .detach() ensures we don't track gradients
+        # .clone() ensures we own the data if the hook deletes the original
+        real_weight = submodule.weight.detach().to("cpu").clone()
+
+    # 3. Cleanup: "Unload this layer to free up GPU memory"
+    #    We pass a dummy output because post_forward usually expects one.
+    if hasattr(submodule, "_hf_hook"):
+        submodule._hf_hook.post_forward(submodule, torch.tensor([]))
+
+    return real_weight
+
 def linearize_rms_norm(rms_norm, input_tensor: torch.Tensor):
     """
     Linearizes a RMS norm operation for a specific input tensor.
@@ -25,7 +52,10 @@ def linearize_rms_norm(rms_norm, input_tensor: torch.Tensor):
     # var = torch.var(input_tensor, dim=-1, unbiased=False)
     inv_std = torch.rsqrt(var + eps).to(input_tensor.dtype)
     # Extract gamma (weight) RMSNorm
-    weight = rms_norm.weight
+    weight = get_real_weight_from_offloaded_module(rms_norm)
+    inv_std = inv_std
+
+    weight = weight.to(inv_std.device)
 
     # Compute the affine transformation matrix L
     L = torch.einsum("s,d->sd" ,inv_std, weight)

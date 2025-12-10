@@ -291,13 +291,17 @@ class LLM_Hooked():
         """
         d_layer, d_head, d_seq_x, d_h_head = value.shape
         _, _, d_seq_y, _ = attn_weights.shape
+        value_device = value.device
 
         # Reshape the dense layer weights for each layer
         Wo = []
         for layer_i in range(d_layer):
-            Wo.append(self.get_reshaped_attention_dense(layer_i, d_h_head, d_head))  # [head, hidden_dim, head_dim]
-        Wo = torch.stack(Wo, dim=0)  # [layer, head, hidden_dim, head_dim]
+            # Extract the weight
+            layer_weight = self.get_reshaped_attention_dense(layer_i, d_h_head, d_head)
+            Wo.append(layer_weight)
 
+        Wo = torch.stack(Wo, dim=0)  # [layer, head, hidden_dim, head_dim]
+        Wo = Wo.to(value_device)
 
         if self.half_precision:
             # Convert tensors to half precision for faster computation
@@ -334,6 +338,10 @@ class LLM_Hooked():
 
         # Reshape to [layer, seq_y, head, seq_x, hidden_dim]
         all_head_outputs = all_head_outputs.transpose(1, 2)
+
+        # delete Wo to avoid memory issue
+        del Wo
+
         return all_head_outputs
 
     def do_sanity_checks(self, residual_stream, residual_outputs, linearized_norm, head_outputs, outputs_attn, mlp_outputs, post_mlp_norms_linear, post_attn_norms_linear):
@@ -778,12 +786,20 @@ class LLM_Hooked():
             tokenized_next_word = [tokenized_next_word[0]]
 
         # Tokenize the sentence and concatenate with next_word token
-        sentence_tokens = self.tokenizer(sentence, return_tensors="pt").input_ids
-        full_sentence_tokens = torch.cat([sentence_tokens, torch.tensor(tokenized_next_word).unsqueeze(0)], dim=1)
+        if isinstance(sentence, str):
+            sentence_tokens = self.tokenizer(sentence, return_tensors="pt").input_ids
+            full_sentence_tokens = torch.cat([sentence_tokens, torch.tensor(tokenized_next_word).unsqueeze(0)], dim=1)
+            # Prepare model inputs and labels
+            input_ids = full_sentence_tokens[:, :-1]
+            attention_mask = torch.ones_like(input_ids)
+        elif hasattr(sentence, 'input_ids'):
+            input_ids = sentence.input_ids
+            full_sentence_tokens = torch.cat([input_ids, torch.tensor(tokenized_next_word).unsqueeze(0)], dim=1)
+        
+        # send to model's device
+        input_ids = input_ids.to(self.model.device)
+        attention_mask = sentence.attention_mask.to(self.model.device)
 
-        # Prepare model inputs and labels
-        input_ids = full_sentence_tokens[:, :-1].to(self.model.device)
-        attention_mask = torch.ones_like(input_ids)
         labels = torch.full_like(input_ids, -100)
         labels[0, -1] = full_sentence_tokens[0, -1]
 
@@ -844,7 +860,12 @@ class LLM_Hooked():
         if len(self.extraction_hook_handles)>0:
             raise ValueError("[LLM Hooked] You forgot to remove the extaction hooks while doing masking! This might cause troubles. Stop here.")
 
-        seq_len = len(self.tokenizer.encode(input_tuple[0]))
+        input_sentence = input_tuple[0]
+        if isinstance(input_sentence, str):
+            seq_len = len(self.tokenizer.encode(input_sentence))
+        elif hasattr(input_sentence, 'input_ids'):
+            seq_len = input_sentence.input_ids.size(-1)
+        
 
         # If a graph is provided, prepare and register masking hooks for the model
         if graph is not None:
