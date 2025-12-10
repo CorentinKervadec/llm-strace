@@ -202,12 +202,13 @@ class LLM_STRACE:
             importance_mode,
         )
 
-    def populate_graph(self, batch_size):
+    def populate_graph(self, batch_size, print_stats=True):
         original_logits = self.graph.populate_graph_with_importance(batch_size)
         self.original_logits = original_logits
-        stats = self.graph.get_edge_weight_stats()
-        for (k,s) in stats.items():
-            print(f"[STRACE][GRAPH STATS] {k}: {s}")
+        if print_stats:
+            stats = self.graph.get_edge_weight_stats()
+            for (k,s) in stats.items():
+                print(f"[STRACE][GRAPH STATS] {k}: {s}")
 
     def label_graph_with_stratum(self, initial_graph: LLM_Graph_NX, tau: float, stratum_index: int, mode: str):
         """
