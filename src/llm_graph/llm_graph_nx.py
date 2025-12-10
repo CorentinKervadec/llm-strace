@@ -90,6 +90,23 @@ def get_weight_stats(weights):
         "interquartile_range (IQR)": interquartile_range
     }
 
+def compute_leverage_scores(X, k=None):
+    # 1. Compute SVD
+    # U: Unitary arrays (Direction)
+    # S: Singular values (Importance/Variance)
+    U, S, Vt = torch.linalg.svd(X.float(), full_matrices=False)
+    
+    # 2. Select top k components (if k is provided)
+    if k is not None:
+        U = U[:, :k]
+        
+    # 3. Leverage scores are simply the squared norms of the rows of U
+    scores = torch.sum(U**2, axis=1)
+    
+    return scores
+
+AVAILABLE_IMPORTANCE_MODES = [None, 'cosim', 'norm', 'norm_l2', 'sim', 'ifr', 'lev_1', 'lev_2', 'lev_4', 'lev_8', 'lev_16', 'lev_32', 'lev_64', 'lev_128', 'lev_256']
+
 class LLM_Graph_NX(nx.MultiDiGraph):
     """
     Represents the model's computation graph using NetworkX.
@@ -101,7 +118,7 @@ class LLM_Graph_NX(nx.MultiDiGraph):
         self,
         llm_hooked: Optional[LLM_Hooked] = None,
         input_sentence: Optional[str] = None,
-        importance_mode: str = "dist",
+        importance_mode: Optional[str] = None,
         **attr
     ):
         """
@@ -120,6 +137,8 @@ class LLM_Graph_NX(nx.MultiDiGraph):
             self.graph['n_heads'] = llm_hooked.get_nb_head()
         self.graph['output_node_index'] = None
         self.graph['input_node_index'] = []
+        if importance_mode not in AVAILABLE_IMPORTANCE_MODES:
+            raise ValueError(f"Selected importance mode '{importance_mode}' is not available.")
         self.importance_mode = importance_mode
         # todo add a test_mode that performs sanity checks?
 
@@ -178,7 +197,12 @@ class LLM_Graph_NX(nx.MultiDiGraph):
         return stats
     
     def preprocess_input_sentence(self):
-        model_input = self.llm_hooked.get_tokenizer()([self.input_sentence], padding=True, return_tensors="pt")
+        if isinstance(self.input_sentence, str):
+            model_input = self.llm_hooked.get_tokenizer()([self.input_sentence], padding=True, return_tensors="pt")
+        elif hasattr(self.input_sentence, 'input_ids'):
+            model_input = self.input_sentence
+        else:
+            raise ValueError(f"Input sentence {self.input_sentence} has not the correct type. Expecting str or torch.Tensor")
         return model_input, model_input.input_ids.shape[-1]
 
     def get_output_node(self):
@@ -243,7 +267,7 @@ class LLM_Graph_NX(nx.MultiDiGraph):
                 T = 1.0: Standard softmax.
             distance_norm (int): The 'p' norm to use for distance calculation.
         """
-        if self.importance_mode == 'dist':
+        if self.importance_mode == 'ifr':
             # Vectorized computation for efficiency
             diff = edge_vectors - node_vector.unsqueeze(0)  # [n_edges, d_h]
             distance = torch.norm(diff, p=distance_norm, dim=1)  # [n_edges]
@@ -252,21 +276,25 @@ class LLM_Graph_NX(nx.MultiDiGraph):
             # Original proximity scores (these are our "logits")
             proximity = (node_norm - distance).clamp(0) # [n_edges]
             
-            # proximity = -distance
-
-            # Apply standard softmax with temperature
-            # T -> 0: Peaky (approaches one-hot)
-            # T = 1: Standard softmax
-            # T -> inf: Flat (approaches uniform)
-                
-            # Divide by temperature *before* softmax
-            # We use dim=0 because the input is 1D (n_edges)
-            # importance = torch.softmax(proximity / self.temperature, dim=0)
             importance = proximity / proximity.sum()
-            # scaling_factor = 1.0 / self.temperature
-            # proximity_scaled = (proximity ** scaling_factor)
-            # importance = proximity_scaled / proximity_scaled.sum()
-            # print(importance)
+        
+        elif self.importance_mode.startswith('lev'):
+            k = int(self.importance_mode.split('_')[-1])
+            lev_score = compute_leverage_scores(edge_vectors, k)
+            importance = lev_score / lev_score.sum()
+            
+        elif self.importance_mode == 'cosim':
+            # Normalize vectors for cosine similarity
+            edge_vectors_norm = edge_vectors / edge_vectors.norm(p=2, dim=1, keepdim=True)  # [n_edges, d_h]
+            node_vector_norm = node_vector / node_vector.norm(p=2, dim=0, keepdim=True)  # [d_h]
+            
+            # Cosine similarity: dot product of normalized vectors
+            cosine_similarity = torch.einsum('eh, h -> e', edge_vectors_norm, node_vector_norm)
+            
+            # (0 to 1, where 0 = opposite, 0.5 = orthogonal, 1 = identical)
+            importance = (1+cosine_similarity)/2
+            
+            # importance = proximity / proximity.sum()
 
         elif self.importance_mode == 'norm':
             edge_norm = torch.norm(edge_vectors, p=distance_norm, dim=1)
@@ -274,11 +302,14 @@ class LLM_Graph_NX(nx.MultiDiGraph):
             importance = edge_norm / edge_norm.sum()
             # print('importance', importance)
         
+        elif self.importance_mode == 'norm_l2':
+            edge_norm = torch.norm(edge_vectors, p=2, dim=1)
+            # print('norm', edge_norm)
+            importance = edge_norm / edge_norm.sum()
+            # print('importance', importance)
+
         elif self.importance_mode == 'random':
             n_edges = edge_vectors.shape[0]
-            # Temperature doesn't really apply to a random distribution
-            # in the same way, but we could scale it if needed.
-            # For now, keeping original logic.
             importance = torch.rand(n_edges) # no need to normalise
         
         else:
@@ -536,10 +567,11 @@ class LLM_Graph_NX(nx.MultiDiGraph):
                             mlp_out,
                             final_norm_linear[token] if layer == self.graph['n_layers']-1 else None, # None if not last layer
                             )
-        if self.llm_hooked.test_mode:
-            # sanity check: Checks that for every node, the sum of incoming edge weights is approximately 1.0.
-            self.check_edge_weights_sum_to_one()
-            print("[LLM Graph] Sanity check passed succesfully!")
+        # If mode=cosim the edge do not sum to 1
+        # if self.llm_hooked.test_mode:
+        #     # sanity check: Checks that for every node, the sum of incoming edge weights is approximately 1.0.
+        #     self.check_edge_weights_sum_to_one()
+        #     print("[LLM Graph] Sanity check passed succesfully!")
         # add output node index = last token of last layer
         self.set_output_node(self.node_idx(current_layer, self.graph['n_tokens']-1))
 
@@ -756,7 +788,7 @@ def load_from_dict(data_to_load: dict, llm_hooked: LLM_Hooked):
     new_llm_graph.graph.update(saved_graph.graph)
     
     # 6. Manually set the other saved attributes
-    new_llm_graph.importance_mode = data_to_load.get('importance_mode', 'dist')
+    new_llm_graph.importance_mode = data_to_load.get('importance_mode', None)
     
     # 7. Re-set the model_input based on the loaded sentence and new hook
     if new_llm_graph.input_sentence and new_llm_graph.llm_hooked:
