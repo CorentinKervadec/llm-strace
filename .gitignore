@@ -82,3 +82,4 @@ WORKBENCH.sh
 !src/llm_trace/
 !data/
 !analyse/
+!find_max_context/
