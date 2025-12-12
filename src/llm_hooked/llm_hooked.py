@@ -793,7 +793,7 @@ class LLM_Hooked():
             input_ids = full_sentence_tokens[:, :-1]
             attention_mask = torch.ones_like(input_ids)
         elif hasattr(sentence, 'input_ids'):
-            input_ids = sentence.input_ids
+            input_ids = sentence.input_ids.long()
             full_sentence_tokens = torch.cat([input_ids, torch.tensor(tokenized_next_word).unsqueeze(0)], dim=1)
         
         # send to model's device

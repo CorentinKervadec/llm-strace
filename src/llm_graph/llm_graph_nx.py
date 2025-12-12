@@ -128,7 +128,7 @@ class LLM_Graph_NX(nx.MultiDiGraph):
         """
         super().__init__(**attr)
         self.llm_hooked = llm_hooked
-        self.input_sentence = input_sentence
+        self.input_sentence = input_sentence.copy() if input_sentence is not None else None
         if llm_hooked is not None:
             self.architecture_type = llm_hooked.get_architecture_type()
             self.model_input, n_tokens = self.preprocess_input_sentence()
@@ -229,15 +229,27 @@ class LLM_Graph_NX(nx.MultiDiGraph):
         #2) update edge importance accordingly
         raise NotImplementedError("Subclasses should implement this method.")
 
-    def populate_graph_with_importance(self, decompose_attention_batch_size: int):
+    def add_new_last_token(self, new_last_token_id):
+        self.model_input.input_ids = torch.concat([self.model_input.input_ids, new_last_token_id], dim=-1)
+        self.model_input.attention_mask = torch.concat([self.model_input.attention_mask, torch.ones_like(new_last_token_id)], dim=-1)
+        self.graph['n_tokens'] = self.model_input.input_ids.size(-1)
+        self.input_sentence = self.model_input
+        # the output node self.graph['output_node_index'] will be updated during the graph population
+        # same for input nodes
+
+    def populate_graph_with_importance(self, decompose_attention_batch_size: int, start_token_idx:int =0):
         """
         Populate the graph using a forward pass from one input sentence.
         This needs to be implemented with model-specific hooks.
+        The start_token_idx allows to update an already existing graph.
+        It will only iterate and add graph components for tokens from start_token_idx to end.
         """
+        if start_token_idx > 0 and len(self.graph) == 0:
+            raise ValueError(f"[LLM_GRAPH] You cannot update an empty graph")
         output = self.llm_hooked.forward_pass(self.model_input, decompose_attention_batch_size, output_pred=True)
         if self.architecture_type == 'sequential':
             residual_stream, mlp_outputs, head_outputs, linearized_norm, post_mlp_norms_linear, post_attn_norms_linear = output[:6]
-            self.populate_with_edge_importance_sequential(residual_stream, head_outputs, mlp_outputs, linearized_norm, post_attn_norms_linear, post_mlp_norms_linear) # this operation is model specific
+            self.populate_with_edge_importance_sequential(residual_stream, head_outputs, mlp_outputs, linearized_norm, post_attn_norms_linear, post_mlp_norms_linear, start_token_idx) # this operation is model specific
         else:
             raise NotImplementedError(f"Graph population from transformer {self.architecture_type} is not implemented.")
         output_logits = output[-1]
@@ -453,7 +465,7 @@ class LLM_Graph_NX(nx.MultiDiGraph):
             name='mlp'
         )
 
-    def populate_with_edge_importance_sequential(self, residual_stream, head_outputs, mlp_outputs, final_norm_linear, post_attn_norms_linear, post_mlp_norms_linear):
+    def populate_with_edge_importance_sequential(self, residual_stream, head_outputs, mlp_outputs, final_norm_linear, post_attn_norms_linear, post_mlp_norms_linear, start_token_idx):
         """
         Build a sequential transformer computation graph (attention before MLP).
         Each layer is split into two: attention and MLP.
@@ -476,12 +488,12 @@ class LLM_Graph_NX(nx.MultiDiGraph):
 
         # Add input (layer 0) nodes
         # input nodes corresponds to the input embeddings
-        for token in range(self.graph['n_tokens']):
+        for token in range(start_token_idx, n_tokens):
             self.add_node(self.node_idx(0, token))
             self.add_input_node(self.node_idx(0, token))
 
         for layer in tqdm(range(self.graph['n_layers']), desc="[LLM Graph] Populate graph:"):                    
-            for token in range(self.graph['n_tokens']):
+            for token in range(start_token_idx, n_tokens):
                 # update tqdm description instead of printing a new line
                 try:
                     if tqdm._instances:

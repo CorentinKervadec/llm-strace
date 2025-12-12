@@ -15,6 +15,81 @@ import os
 
 EPS = 1e-6
 
+THRESHOLD_STRACE = {
+    'norm_nucleus': [
+        1.0, .9995, .999, .995, .99, .985, .98, .975, .97, .96, .95,
+        .9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1
+    ],
+    'norm_l2_nucleus': [
+        1.0, .9995, .999, .995, .99, .985, .98, .975, .97, .96, .95,
+        .9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1
+    ],
+    'ifr_nucleus': [
+        1.0, .9995, .999, .995, .99, .985, .98, .975, .97, .96, .95,
+        .9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1
+    ],
+    'ifr_threshold': [
+        1e-8, 1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+    ],
+    'sim_nucleus': [
+        1.0, .9995, .999, .995, .99, .985, .98, .975, .97, .96, .95,
+        .9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1
+    ],
+    'sim_threshold': [
+        1e-4, 5e-4, 1e-3, 2e-3, 3e-3, 4e-3, 5e-3, 1e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+    ],
+    'norm_threshold': [
+        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+    ],
+    'norm_l2_threshold': [
+        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+    ],
+    'cosim_threshold': [
+        0.1, 0.2, 0.3, 0.35, 0.4, 0.425, 0.45, 0.475, 0.49, 0.5, 0.51, 0.525, 0.55, 0.575, 0.6, 0.65, 0.7, 0.8, 0.9, 1.0
+    ],
+    'lev_256_threshold':
+    [
+        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+    ],
+    'lev_128_threshold':
+    [
+        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+    ],
+    'lev_64_threshold':
+    [
+        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+    ],
+    'lev_32_threshold':
+    [
+        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+    ],
+    'lev_16_threshold':
+    [
+        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+    ],
+    'lev_8_threshold':
+    [
+        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+    ],
+    'lev_4_threshold':
+    [
+        1e-8, 1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+    ],
+    'lev_2_threshold':
+    [
+        1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+    ],
+}
+
+class MockTokenized:
+    def __init__(self, ids, mask):
+        self.input_ids = ids
+        self.attention_mask = mask
+
+    def copy(self):
+        return MockTokenized(self.input_ids.clone(), self.attention_mask.clone())
+
+
 def get_total_variation(original_logits, graph_logits):
     """
     Compute the total variation distance between the probability distributions
@@ -202,13 +277,27 @@ class LLM_STRACE:
             importance_mode,
         )
 
-    def populate_graph(self, batch_size, print_stats=True):
-        original_logits = self.graph.populate_graph_with_importance(batch_size)
+    def populate_graph(self, batch_size, print_stats=True, start_token_idx=0):
+        original_logits = self.graph.populate_graph_with_importance(batch_size, start_token_idx)
         self.original_logits = original_logits
         if print_stats:
             stats = self.graph.get_edge_weight_stats()
             for (k,s) in stats.items():
                 print(f"[STRACE][GRAPH STATS] {k}: {s}")
+    
+    def update_trace(self, new_last_token_id, batch_size, print_stats=True):
+        # update the input // we ignore the next token
+        # we assume that the input tuple was tokenized 
+        self.input_tuple[0].input_ids = torch.concat([self.input_tuple[0].input_ids, new_last_token_id], dim=-1)
+        self.input_tuple[0].attention_mask = torch.concat([self.input_tuple[0].attention_mask, torch.ones_like(new_last_token_id)], dim=-1)
+        # reset the trace metrics
+        self.reset_strace()
+        # update the graph
+        self.graph.add_new_last_token(new_last_token_id)
+        # repopulate the graph, updating only the last token
+        start_token_idx = self.input_tuple[0].input_ids.size(-1) - 1
+        self.populate_graph(batch_size, print_stats, start_token_idx)
+
 
     def label_graph_with_stratum(self, initial_graph: LLM_Graph_NX, tau: float, stratum_index: int, mode: str):
         """
@@ -565,39 +654,39 @@ class LLM_STRACE:
                     self.strata_loss[key_tuple[0]][key_tuple[1]].append(loss)
                     self.strata_entropy[key_tuple[0]][key_tuple[1]].append(entropy)
 
-    def save(self, file_path: str):
-        """
-        Saves a specific subset of the LLM_STRACE attributes to a file
-        as a dictionary.
-        """
-        graph_data_dict = self.graph.pre_save()
-        # Create the dictionary with only the attributes we want
-        data_to_save = {
-            'graph': graph_data_dict,
-            'strata_rel_size': self.strata_rel_size,
-            'strata_raw_size': self.strata_raw_size,
-            'strata_reco_tv': self.strata_reco_tv,
-            'strata_reco_nu': self.strata_reco_nu,
-            'strata_tau': self.strata_tau,
-            'strata_index': self.strata_index,
-            'strata_connected_to_input': self.strata_connected_to_input,
-            'strata_loss': self.strata_loss,
-            'strata_entropy': self.strata_entropy,
-            'input_tuple': self.input_tuple,
-            'nb_strata': self.nb_strata,
-            'nucleus_60': self.strata_nucleus_60,
-            'nb_tokens': self.graph.graph['n_tokens'],
-            # Note: self.original_logits is NOT saved
-            # Note: self.llm_hooked is NOT saved
-        }
+    # def save(self, file_path: str):
+    #     """
+    #     Saves a specific subset of the LLM_STRACE attributes to a file
+    #     as a dictionary.
+    #     """
+    #     graph_data_dict = self.graph.pre_save()
+    #     # Create the dictionary with only the attributes we want
+    #     data_to_save = {
+    #         'graph': graph_data_dict,
+    #         'strata_rel_size': self.strata_rel_size,
+    #         'strata_raw_size': self.strata_raw_size,
+    #         'strata_reco_tv': self.strata_reco_tv,
+    #         'strata_reco_nu': self.strata_reco_nu,
+    #         'strata_tau': self.strata_tau,
+    #         'strata_index': self.strata_index,
+    #         'strata_connected_to_input': self.strata_connected_to_input,
+    #         'strata_loss': self.strata_loss,
+    #         'strata_entropy': self.strata_entropy,
+    #         'input_tuple': self.input_tuple,
+    #         'nb_strata': self.nb_strata,
+    #         'nucleus_60': self.strata_nucleus_60,
+    #         'nb_tokens': self.graph.graph['n_tokens'],
+    #         # Note: self.original_logits is NOT saved
+    #         # Note: self.llm_hooked is NOT saved
+    #     }
         
-        # Save the dictionary using pickle
-        try:
-            with open(file_path, 'wb') as f:
-                pickle.dump(data_to_save, f)
-            print(f"[LLM_STRACE] Successfully saved to {file_path}")
-        except Exception as e:
-            print(f"[LLM_STRACE] Error saving file: {e}")
+    #     # Save the dictionary using pickle
+    #     try:
+    #         with open(file_path, 'wb') as f:
+    #             pickle.dump(data_to_save, f)
+    #         print(f"[LLM_STRACE] Successfully saved to {file_path}")
+    #     except Exception as e:
+    #         print(f"[LLM_STRACE] Error saving file: {e}")
 
 
     def save_light(self, file_path: str):
@@ -608,7 +697,15 @@ class LLM_STRACE:
         
         # --- 1. Serialize the Graph efficiently ---
         graph = self.graph
+        if isinstance(self.input_tuple[0], str):
+            input = self.input_tuple[0]
+        elif hasattr(self.input_tuple[0], 'input_ids'):
+            input = np.array(self.input_tuple[0].input_ids, dtype=np.uint32)
+        else:
+            raise ValueError(f"[LLM TRACE SAVE] Input in wrong format: {self.input_tuple[0]}")
+        next_token = self.input_tuple[1]
         
+
         # Create a mapping for edge names (e.g., 'mlp' -> 0, 'attn_h1t2' -> 1)
         # This is the single biggest space saver.
         edge_names = list(set(nx.get_edge_attributes(graph, 'name').values()))
@@ -626,12 +723,20 @@ class LLM_STRACE:
         
         i = 0
         for u, v, data in graph.edges(data=True):
-            edge_list_array[i] = [u, v]
+            edge_list_array[i] = (u, v)
             edge_weights_array[i] = data.get('weight')
             edge_name_ids_array[i] = name_to_id.get(data.get('name'))
             edge_stratum_array[i] = data.get('stratum', -1)
             i += 1
             
+        # if isinstance(self.input_tuple[0], str):
+        #     input_tuple_save = self.input_tuple
+        # elif hasattr(self.input_tuple[0], 'input_ids'):
+        #     input_tuple_save = (
+        #         np.array(self.input_tuple[0].input_ids, dtype=np.uint32),
+        #         self.input_tuple[1]
+        #     )
+
         # --- 2. Create the dictionary of all data to save ---
         # We save graph attributes (like n_tokens) as a single dict
         graph_attrs = dict(graph.graph)
@@ -657,9 +762,10 @@ class LLM_STRACE:
             'strata_connected_to_input': self.strata_connected_to_input,
             'strata_loss': self.strata_loss,
             'strata_entropy': self.strata_entropy,
-            'input_tuple': self.input_tuple,
+            'input': input,
+            'next_token': next_token,
             'nb_strata': self.nb_strata,
-            'nucleus_60': self.strata_nucleus_60, # only the first 5
+            'nucleus_60': self.strata_nucleus_60,
         }
         
         # --- 3. Save as a compressed .npz file ---
@@ -672,52 +778,52 @@ class LLM_STRACE:
         except Exception as e:
             print(f"[LLM_STRACE] Error saving file: {e}")
 
-def load_from_file(file_path: str, llm_hooked: LLM_Hooked, track_time: bool = False):
-    """
-    Loads the saved strace data from a pickle file and reconstructs
-    the LLM_STRACE object.
+# def load_from_file(file_path: str, llm_hooked: LLM_Hooked, track_time: bool = False):
+#     """
+#     Loads the saved strace data from a pickle file and reconstructs
+#     the LLM_STRACE object.
     
-    Requires an active llm_hooked object to be passed in / or none if not used.
-    """
-    if not os.path.exists(file_path):
-        print(f"[LLM_STRACE] Error: File not found at {file_path}")
-        return None
+#     Requires an active llm_hooked object to be passed in / or none if not used.
+#     """
+#     if not os.path.exists(file_path):
+#         print(f"[LLM_STRACE] Error: File not found at {file_path}")
+#         return None
 
-    try:
-        with open(file_path, 'rb') as f:
-            data_to_load = pickle.load(f)
-    except Exception as e:
-        print(f"[LLM_STRACE] Error loading pickle file: {e}")
-        return None
+#     try:
+#         with open(file_path, 'rb') as f:
+#             data_to_load = pickle.load(f)
+#     except Exception as e:
+#         print(f"[LLM_STRACE] Error loading pickle file: {e}")
+#         return None
 
-    # Create a new instance using the saved input_tuple
-    new_strace = LLM_STRACE(data_to_load['input_tuple'], llm_hooked, track_time=track_time)
+#     # Create a new instance using the saved input_tuple
+#     new_strace = LLM_STRACE(data_to_load['input_tuple'], llm_hooked, track_time=track_time)
 
-    # Re-hydrate the graph
-    try:
-        graph_data_dict = data_to_load['graph']
-        new_strace.graph = load_from_dict(graph_data_dict, llm_hooked)
-    except Exception as e:
-        print(f"[LLM_STRACE] Error re-hydrating graph: {e}")
-        return None
+#     # Re-hydrate the graph
+#     try:
+#         graph_data_dict = data_to_load['graph']
+#         new_strace.graph = load_from_dict(graph_data_dict, llm_hooked)
+#     except Exception as e:
+#         print(f"[LLM_STRACE] Error re-hydrating graph: {e}")
+#         return None
 
-    # Re-populate other attributes, using .get() for safety
-    new_strace.strata_rel_size = data_to_load.get('strata_rel_size')
-    new_strace.strata_raw_size = data_to_load.get('strata_raw_size')
-    new_strace.strata_reco_tv = data_to_load.get('strata_reco_tv')
-    new_strace.strata_reco_nu = data_to_load.get('strata_reco_nu')
-    new_strace.strata_tau = data_to_load.get('strata_tau')
-    new_strace.strata_index = data_to_load.get('strata_index')
-    new_strace.strata_connected_to_input = data_to_load.get('strata_connected_to_input')
-    new_strace.strata_loss = data_to_load.get('strata_loss')
-    new_strace.strata_entropy = data_to_load.get('strata_entropy')
-    new_strace.nb_strata = data_to_load.get('nb_strata')
-    new_strace.strata_nucleus_60 = data_to_load.get('nucleus_60')
-    # Note: 'nb_tokens' is in graph.graph['n_tokens'] and will be
-    # loaded as part of the graph re-hydration.
+#     # Re-populate other attributes, using .get() for safety
+#     new_strace.strata_rel_size = data_to_load.get('strata_rel_size')
+#     new_strace.strata_raw_size = data_to_load.get('strata_raw_size')
+#     new_strace.strata_reco_tv = data_to_load.get('strata_reco_tv')
+#     new_strace.strata_reco_nu = data_to_load.get('strata_reco_nu')
+#     new_strace.strata_tau = data_to_load.get('strata_tau')
+#     new_strace.strata_index = data_to_load.get('strata_index')
+#     new_strace.strata_connected_to_input = data_to_load.get('strata_connected_to_input')
+#     new_strace.strata_loss = data_to_load.get('strata_loss')
+#     new_strace.strata_entropy = data_to_load.get('strata_entropy')
+#     new_strace.nb_strata = data_to_load.get('nb_strata')
+#     new_strace.strata_nucleus_60 = data_to_load.get('nucleus_60')
+#     # Note: 'nb_tokens' is in graph.graph['n_tokens'] and will be
+#     # loaded as part of the graph re-hydration.
 
-    print(f"[LLM_STRACE] Successfully loaded from {file_path}")
-    return new_strace    
+#     print(f"[LLM_STRACE] Successfully loaded from {file_path}")
+#     return new_strace    
 
 def load_from_file_light(file_path: str, llm_hooked: LLM_Hooked):
     """
@@ -744,13 +850,20 @@ def load_from_file_light(file_path: str, llm_hooked: LLM_Hooked):
         # Load the compressed .npz file
         # allow_pickle=True is required to load dicts and non-array objects
         data = np.load(file_path, allow_pickle=True)
-        
+        if isinstance(data['input'], str):
+            input_tuple = (data['input'].item(), data['next_token'].item())
+        elif isinstance(data['input'], np.ndarray):
+            input_ids = torch.tensor(data['input'])
+            mock_tokenized = MockTokenized(input_ids, torch.zeros_like(input_ids))
+            input_tuple = (mock_tokenized, data['next_token'].item())
+        else:
+            raise ValueError(f"[LLM TRACE LOAD] Input in wrong format: {data['input']}")
         # --- 1. Reconstruct the graph ---
         
         # Start with an empty graph and set attributes
         llm_graph = LLM_Graph_NX(
             llm_hooked, 
-            input_sentence=data.get('input_tuple')[0])
+            input_sentence=input_tuple[0])
         
         llm_graph.clear()
         llm_graph.graph = data['graph_attrs'].item() # .item() extracts the dict
@@ -780,7 +893,7 @@ def load_from_file_light(file_path: str, llm_hooked: LLM_Hooked):
         # --- 2. Reconstruct the LLM_STRACE object ---
         
         # Create a dummy object first (won't be used, but needed for cls)
-        strace = LLM_STRACE(data['input_tuple'], llm_hooked)
+        strace = LLM_STRACE(input_tuple, llm_hooked)
         
         # Overwrite the empty graph with our loaded one
         strace.graph = llm_graph
@@ -795,7 +908,7 @@ def load_from_file_light(file_path: str, llm_hooked: LLM_Hooked):
         strace.strata_connected_to_input = list(data['strata_connected_to_input'])
         strace.strata_loss = data['strata_loss'].item()
         strace.strata_entropy = data['strata_entropy'].item()
-        strace.input_tuple = list(data['input_tuple'])
+        strace.input_tuple = input_tuple
         strace.nb_strata = data['nb_strata'].item()
         strace.strata_nucleus_60 = data['nucleus_60'].item()
         
