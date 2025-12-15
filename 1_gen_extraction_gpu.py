@@ -6,6 +6,7 @@ import numpy as np
 from torch.nn.functional import softmax
 from pathlib import Path
 import csv
+import random
 
 # Add project root to path
 sys.path.append(str(Path(__file__).resolve().parent))
@@ -74,9 +75,14 @@ def main():
     parser.add_argument('--max_new_tokens', type=int, default=20)
     parser.add_argument('--batch_size', type=int, default=32, help="For graph population")
     parser.add_argument('--p_sample', type=float, default=0.6, help="Parameter for nucleus sampling (0.0 to 1.0)")
+    parser.add_argument('--seed', type=int, required=True, help="Random seed (for llm sampling)")
     args = parser.parse_args()
 
     TOP_K_SAVE=100
+
+    # - set the random seed
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
 
     # --- 1. Load Prompt ---
     try:
