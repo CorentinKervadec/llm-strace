@@ -48,6 +48,8 @@ logs/
 # Ignore Slurm output files that might be created at the root
 
 slurm-*.out
+*.out
+*.err
 
 WORKBENCH.sh
 
