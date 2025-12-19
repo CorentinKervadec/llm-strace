@@ -60,7 +60,7 @@ def sample_next_token(logits, temperature=1.0, top_p=0.9):
 
 def get_entropy(logits):
     # Compute probabilities for the last token (full distribution, before filtering)
-    probabilities = softmax(logits[:, -1], dim=-1)
+    probabilities = softmax(logits[:, -1].float(), dim=-1)
     entropy = -torch.sum(probabilities * torch.log(probabilities + EPS)).item()
     return entropy
 
@@ -107,7 +107,7 @@ def main():
     tsv_file_path = os.path.join(prompt_dir, 'generation.tsv')
     # Write header
     with open(tsv_file_path, 'w') as tsv_file:
-        tsv_file.write("next_token_str\tnext_token_id\tnext_token_prob\tnucleus_token_id\tentropy\n")
+        tsv_file.write("next_token_id\tnext_token_prob\tnucleus_token_id\tentropy\n")
 
     # --- 3. Init Model ---
     HOOKED_CONSTRUCTOR = get_hooked_constructor(args.model_name)
@@ -170,7 +170,7 @@ def main():
         nucleus_str = '_'.join([str(i) for i in nucleus_token_id][:TOP_K_SAVE])
         
         with open(tsv_file_path, 'a') as tsv_file:
-            tsv_file.write(f"{next_token_str}\t{next_token_id[0].item()}\t{next_token_prob.item()}\t{nucleus_str}\t{entropy}\n")
+            tsv_file.write(f"{next_token_id[0].item()}\t{next_token_prob.item()}\t{nucleus_str}\t{entropy}\n")
 
     # --- End of Generation ---
     full_text_str = llm_hooked.tokenizer.decode(full_text_tokenized[0])
