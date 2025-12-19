@@ -92,7 +92,7 @@ def main():
             if args.prompt_index < 0 or args.prompt_index >= len(rows):
                 print(f"Error: Prompt index {args.prompt_index} out of range.")
                 raise ValueError
-            prompt = rows[args.prompt_index]['Paragraph Text'].strip()
+            prompt = rows[args.prompt_index]['prompt'].strip()
     except Exception as e:
         print(f"Error loading prompt file: {e}")
         exit(1)

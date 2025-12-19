@@ -60,7 +60,7 @@ def main():
         strace.save_light(final_file_path)
         os.remove(strace_file) # remove the intermediate file once it is consumed
         
-    print(f"[GPU-JOB-2 {args.chunk_id}] Finished processing sentences {start_index} to {end_index - 1}")
+    print(f"[GPU-JOB-2 {step}] Finished processing sentences {start_index} to {end_index - 1}")
 
 
 if __name__ == "__main__":

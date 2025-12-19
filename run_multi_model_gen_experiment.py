@@ -4,9 +4,12 @@ import datetime
 import os
 import random
 import re
+import json
+import sys
+from collections import defaultdict
 
 # --- Configuration ---
-PROMPTS_FILE = "data/prompts_test.txt"
+PROMPTS_FILE = "data/meta_prompts_v2.csv"
 IMPORTANCE_MODE = "norm"
 STRACE_MODE = "threshold"
 MAX_NEW_TOKENS = 20
@@ -14,42 +17,65 @@ START_STAGE = 1
 END_STAGE = 3
 NUM_SEEDS = 2
 
-AVAILABLE_MODELS = [
-    "mistralai/Mistral-7B-v0.1",
-    'allenai/OLMo-2-0425-1B',
-    "allenai/OLMo-2-1124-7B",
-    "allenai/OLMo-2-1124-13B",
-    "Qwen/Qwen3-0.6B-Base",
-    "Qwen/Qwen3-1.7B-Base",
-    "Qwen/Qwen3-4B-Base",
-    "Qwen/Qwen3-8B-Base",
-    # "google/gemma-3-270m",
-    "Qwen/Qwen2.5-0.5B",
-    "Qwen/Qwen2.5-1.5B",
-    "Qwen/Qwen2.5-3B",
-    "Qwen/Qwen2.5-7B",
-    "Qwen/Qwen2.5-14B",
-    # "Qwen/Qwen2.5-32B",
-    "Qwen/Qwen2-0.5B",
-    "Qwen/Qwen2-1.5B",
-    "Qwen/Qwen2-7B",
-]
+# -- Throttling & Priority Settings --
+SEED_SUBMISSION_DELAY = 5    # Seconds to wait between seeds (avoids rapid-fire submission)
+MODEL_SUBMISSION_DELAY = 1    # Seconds to wait between switching models
+SLURM_NICE_VALUE = "1000"     # Higher value = LOWER priority. (Standard user range usually 0-10000)
 
-LOG_FILE = "multi_model_experiment.log"
+# -- File Paths --
+LOG_FILE = "multi_model_experiment_1.log"
+STATE_FILE = "experiment_state_1.json" # To save progress in case of crash
+
+AVAILABLE_MODELS = [
+    # "mistralai/Mistral-7B-v0.1",
+    # 'allenai/OLMo-2-0425-1B',
+    # "allenai/OLMo-2-1124-7B",
+    # "allenai/OLMo-2-1124-13B",
+    "Qwen/Qwen3-0.6B-Base",
+    # "Qwen/Qwen3-1.7B-Base",
+    # "Qwen/Qwen3-4B-Base",
+    # "Qwen/Qwen3-8B-Base",
+    # "Qwen/Qwen2.5-0.5B",
+    # "Qwen/Qwen2.5-1.5B",
+    # "Qwen/Qwen2.5-3B",
+    # "Qwen/Qwen2.5-7B",
+    # "Qwen/Qwen2.5-14B",
+    # "Qwen/Qwen2-0.5B",
+    # "Qwen/Qwen2-1.5B",
+    # "Qwen/Qwen2-7B",
+]
 
 # --- Helper Functions ---
 
-def log(message):
+def log(message, print_to_console=True):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     formatted_msg = f"[{timestamp}] {message}"
-    print(formatted_msg)
+    if print_to_console:
+        print(formatted_msg)
     with open(LOG_FILE, "a") as f:
         f.write(formatted_msg + "\n")
 
+def save_state(job_registry):
+    """Saves the current job registry to a JSON file for recovery."""
+    try:
+        with open(STATE_FILE, 'w') as f:
+            json.dump(job_registry, f, indent=4)
+    except Exception as e:
+        log(f"WARNING: Failed to save state file: {e}")
+
+def load_state():
+    """Loads previous job registry if it exists."""
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            log(f"WARNING: Found state file but failed to load: {e}")
+    return {}
+
 def submit_job(model, seed):
     """
-    Submits the GEN_MASTER_SLURM.sh script for a specific model and seed.
-    Returns a dictionary mapping Stage (1,2,3) to JobID if successful, None otherwise.
+    Submits the GEN_MASTER_SLURM.sh script.
     """
     cmd = [
         "./GEN_MASTER_SLURM.sh",
@@ -63,33 +89,32 @@ def submit_job(model, seed):
         str(END_STAGE)
     ]
     
+    # Inject Nice value into environment for this subprocess
+    env = os.environ.copy()
+    if SLURM_NICE_VALUE:
+        env["SBATCH_NICE"] = SLURM_NICE_VALUE
+
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        # Run subprocess with the modified environment
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, env=env)
         output = result.stdout.strip()
         
-        # Parse output for lines like "  -> Job ID: 12345"
-        # We assume the order is sequential: Stage 1, Stage 2, Stage 3
-        # GEN_MASTER_SLURM.sh prints them in order.
-        
-        job_ids = re.findall(r'Job ID: (\d+)', output)
+        # Regex to capture Job ID.
+        job_ids = re.findall(r'Job ID:\s*(\d+)', output)
         
         if job_ids:
-            # Map found IDs to stages based on how many were submitted
-            # This assumes standard execution order: 1 -> 2 -> 3
-            # If start_stage > 1, the first ID found corresponds to that start stage.
-            
             job_map = {}
             current_stage = START_STAGE
             for jid in job_ids:
                 if current_stage <= END_STAGE:
-                    job_map[current_stage] = jid
+                    job_map[str(current_stage)] = jid # Use string keys for JSON compatibility
                     current_stage += 1
             
             stages_str = ", ".join([f"S{s}:{jid}" for s, jid in job_map.items()])
             log(f"SUCCESS: Submitted {model} (Seed {seed}) -> {stages_str}")
             return job_map
         else:
-            log(f"WARNING: Submitted {model} (Seed {seed}) but found no JobIDs. Output:\n{output}")
+            log(f"WARNING: Submitted {model} (Seed {seed}) but parsing JobID failed. Output:\n{output}")
             return None
 
     except subprocess.CalledProcessError as e:
@@ -97,115 +122,147 @@ def submit_job(model, seed):
         log(f"  Stderr: {e.stderr}")
         return None
 
-def get_job_info(job_ids):
-    """
-    Queries sacct to get status and elapsed time for a list of jobs.
-    Returns a dict: {job_id: {'state': state, 'elapsed': elapsed_time}}
-    """
-    if not job_ids:
-        return {}
-    
-    # Filter valid IDs
-    valid_ids = [str(jid) for jid in job_ids if jid]
-    if not valid_ids:
-        return {}
+def batch_list(iterable, n=1):
+    """Yields successive n-sized chunks from iterable."""
+    l = len(iterable)
+    for ndx in range(0, l, n):
+        yield iterable[ndx:min(ndx + n, l)]
 
-    job_id_str = ",".join(valid_ids)
-    
-    # Query sacct for State and Elapsed time
-    cmd = ['sacct', '-j', job_id_str, '-n', '-o', 'JobID,State,Elapsed']
-    
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        info = {}
-        for line in result.stdout.splitlines():
-            parts = line.split()
-            if len(parts) >= 3:
-                jid = parts[0]
-                if '.' in jid: continue # Skip batch steps
-                
-                state = parts[1]
-                elapsed = parts[2]
-                info[jid] = {'state': state, 'elapsed': elapsed}
-        return info
-    except Exception as e:
-        log(f"Warning: Failed to query sacct: {e}")
+def get_job_status_aggregate(base_job_ids):
+    """
+    Queries sacct for a list of base Job IDs. 
+    Batches queries to avoid 'Argument list too long' errors.
+    """
+    if not base_job_ids:
         return {}
+    
+    aggregated_info = {}
+    valid_ids = [str(jid) for jid in base_job_ids if jid]
+    
+    # Process in chunks of 100 to prevent command line overflow
+    for chunk in batch_list(valid_ids, 100):
+        job_id_str = ",".join(chunk)
+        cmd = ['sacct', '-j', job_id_str, '-n', '-o', 'JobIDRaw,State,Elapsed']
+        
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            tasks_per_job = defaultdict(list)
+            
+            for line in result.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    jid_raw = parts[0]
+                    state = parts[1]
+                    elapsed = parts[2] if len(parts) > 2 else "00:00:00"
+                    
+                    if '.' in jid_raw: continue # Skip batch steps
+                    
+                    # Handle Array IDs: 12345_1 -> Base 12345
+                    base_id = jid_raw.split('_')[0]
+                    
+                    if base_id in chunk:
+                        tasks_per_job[base_id].append((state, elapsed))
+
+            # Aggregate
+            for base_id in chunk:
+                tasks = tasks_per_job.get(base_id, [])
+                if not tasks:
+                    aggregated_info[base_id] = {'state': 'PENDING', 'elapsed': '00:00:00'}
+                    continue
+                    
+                states = [t[0] for t in tasks]
+                elapsed_times = [t[1] for t in tasks]
+                
+                # Simplified state logic
+                if any(s.startswith('RUNNING') for s in states): final_state = 'RUNNING'
+                elif any(s.startswith('PENDING') for s in states): final_state = 'PENDING'
+                elif any(s.startswith('FAILED') or s.startswith('TIMEOUT') for s in states): final_state = 'FAILED'
+                elif all(s.startswith('COMPLETED') for s in states): final_state = 'COMPLETED'
+                elif any(s.startswith('CANCELLED') for s in states): final_state = 'CANCELLED'
+                else: final_state = states[0]
+                
+                aggregated_info[base_id] = {'state': final_state, 'elapsed': elapsed_times[0]}
+
+        except Exception as e:
+            log(f"Warning: Failed to query sacct batch: {e}")
+
+    return aggregated_info
 
 def monitor_jobs(job_registry):
     """
     Loops until all submitted jobs are finished.
-    job_registry: dict mapping job_id -> { 'model': str, 'seed': int, 'stage': int }
     """
     log("--- Starting Monitoring Phase ---")
+    log("Tip: You can safely Ctrl+C this script; the job state is saved to experiment_state.json")
     
     active_jobs = set(job_registry.keys())
-    total_jobs = len(active_jobs)
-    start_monitor = time.time()
     
-    # Track completion
-    completed_jobs = set()
-
-    while active_jobs:
-        # Query status
-        job_info = get_job_info(list(active_jobs))
-        
-        current_active = set()
-        
-        for jid in active_jobs:
-            # Metadata for logging
-            meta = job_registry[jid]
-            label = f"{meta['model']} (Seed {meta['seed']}) Stage {meta['stage']}"
-
-            if jid not in job_info:
-                # Job might be queued but not in accounting yet, assume active
-                current_active.add(jid)
-                continue
+    try:
+        while active_jobs:
+            # Query status
+            job_info = get_job_status_aggregate(list(active_jobs))
+            
+            current_active = set()
+            completed_in_this_loop = 0
+            
+            for jid in active_jobs:
+                if jid not in job_info:
+                    current_active.add(jid) # Assume pending/unknown, keep tracking
+                    continue
+                    
+                state = job_info[jid]['state']
                 
-            state = job_info[jid]['state']
-            elapsed = job_info[jid]['elapsed']
-            
-            # Check terminal states
-            if state in ['COMPLETED', 'FAILED', 'CANCELLED', 'TIMEOUT', 'OUT_OF_MEMORY', 'NODE_FAIL']:
-                if jid not in completed_jobs:
-                    log(f"[{state}] Job {jid} finished: {label}. Duration: {elapsed}")
-                    completed_jobs.add(jid)
-            else:
-                # PENDING, RUNNING, REQUEUED
-                current_active.add(jid)
+                if state in ['COMPLETED', 'FAILED', 'CANCELLED', 'TIMEOUT', 'OUT_OF_MEMORY', 'NODE_FAIL']:
+                    # Job is terminal
+                    completed_in_this_loop += 1
+                else:
+                    current_active.add(jid)
 
-        active_jobs = current_active
-        finished_count = len(completed_jobs)
-        
-        elapsed_total = time.time() - start_monitor
-        elapsed_str = str(datetime.timedelta(seconds=int(elapsed_total)))
-        
-        log(f"Status: {finished_count}/{total_jobs} finished. {len(active_jobs)} active.")
-        log(f"  Monitor Running Time: {elapsed_str}")
-        
-        if not active_jobs:
-            break
+            active_jobs = current_active
             
-        # Check every 5 minutes
-        time.sleep(300) 
+            # log status update
+            log(f"Status Update: {len(active_jobs)} arrays still active. {completed_in_this_loop} finished recently.", print_to_console=True)
+            
+            if not active_jobs:
+                break
+                
+            time.sleep(300) # Check every 5 minutes
+
+    except KeyboardInterrupt:
+        log("\n--- Monitoring Interrupted by User ---")
+        log(f"State saved to {STATE_FILE}. You can restart monitoring later.")
+        save_state(job_registry)
+        sys.exit(0)
 
 def main():
     log("=== Starting Multi-Model Experiment Run ===")
     
-    start_time = time.time()
-    
-    # Registry stores metadata for every job ID we launch
-    # Format: { job_id: { 'model': ..., 'seed': ..., 'stage': ... } }
-    job_registry = {}
+    # 1. Load existing state if we are resuming
+    job_registry = load_state()
+    if job_registry:
+        log(f"Resumed from previous state file. Found {len(job_registry)} jobs already tracked.")
+        # Ask user if they want to submit new ones or just monitor
+        # For automation, we assume if state exists, we might still want to submit MISSING models? 
+        # For now, let's assume we proceed to submit, but you might want logic to skip already done ones.
+        pass
 
-    # 1. Submission Phase
+    start_time = time.time()
+
+    # 2. Submission Phase
+    # We loop through models/seeds. If we want to be smart, we check if they are already in job_registry.
+    # To keep it simple, I assume you manage the lists or clear the json for a fresh run.
+    
+    log(f"--- Submission Phase (Delay: {SEED_SUBMISSION_DELAY}s per seed) ---")
+    
     for model in AVAILABLE_MODELS:
-        log(f"--- Processing Model: {model} ---")
+        log(f"Processing Model: {model}")
         
         seeds = [random.randint(10000, 99999) for _ in range(NUM_SEEDS)]
         
         for i, seed in enumerate(seeds):
-            # submit_job returns a dict: {stage_num: job_id}
+            # Generate a unique key to check if we already did this (optional safety)
+            # submission_key = f"{model}_{seed}" 
+            
             job_map = submit_job(model, seed)
             
             if job_map:
@@ -213,16 +270,22 @@ def main():
                     job_registry[jid] = {
                         'model': model,
                         'seed': seed,
-                        'stage': stage
+                        'stage': stage,
+                        'submitted_at': time.time()
                     }
+                # Save state immediately after successful submission
+                save_state(job_registry)
             
-            time.sleep(1) # Short delay
+            # Delay between seeds to prevent flooding
+            time.sleep(SEED_SUBMISSION_DELAY)
+
+        # Delay between models
+        time.sleep(MODEL_SUBMISSION_DELAY)
 
     submission_end = time.time()
-    log(f"=== All Submissions Complete ({len(job_registry)} individual jobs tracked) ===")
-    log(f"Submission duration: {(submission_end - start_time):.2f}s")
+    log(f"=== All Submissions Complete ({len(job_registry)} jobs tracked) ===")
     
-    # 2. Monitoring Phase
+    # 3. Monitoring Phase
     if job_registry:
         monitor_jobs(job_registry)
     
