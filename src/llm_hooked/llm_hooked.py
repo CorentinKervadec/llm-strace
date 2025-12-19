@@ -22,7 +22,7 @@ def surprisal(logits, labels):
         loss = F.cross_entropy(logits, labels.view(-1).cpu(), ignore_index=-100).item()
 
     # Compute probabilities for the last token
-    probabilities = torch.softmax(logits[-1], dim=-1)
+    probabilities = torch.softmax(logits[-1].float(), dim=-1)
     entropy = -torch.sum(probabilities * torch.log(probabilities + EPS)).item()
 
     # Predicted token id (highest probability)
