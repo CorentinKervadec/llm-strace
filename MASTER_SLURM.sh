@@ -3,9 +3,10 @@
 #-----------------------------------------------------------------------
 # Master SLURM Job Submission Script
 #
-# Usage: ./submit_jobs.sh <model_name> <sentence_length> <nb_data> <chunk_size> [start_stage] [end_stage]
+# Usage: ./submit_jobs.sh <gpu_partition> <model_name> <sentence_length> <nb_data> <chunk_size> [start_stage] [end_stage]
 #
 # Arguments:
+#   partition:       (Required) e.g., "alien" or "medium"
 #   model_name:      (Required) e.g., "allenai/OLMo-2-0425-1B"
 #   importance:      (Required) e.g., "norm"
 #   strace:          (Required) e.g., "threshold"
@@ -26,25 +27,29 @@
 set -e # Exit immediately if any command fails
 
 # --- 1. Input Validation ---
-if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ] || [ -z "$5" ] || [ -z "$6" ]; then
+if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ] || [ -z "$5" ] || [ -z "$6" ] || [ -z "$7" ]; then
     echo "Error: Missing required arguments."
-    echo "Usage: $0 <model_name> <importance> <threshold> <sentence_length> <nb_data> <chunk_size> [start_stage] [end_stage]"
+    echo "Usage: $0 <gpu_partition> <model_name> <importance> <threshold> <sentence_length> <nb_data> <chunk_size> [start_stage] [end_stage]"
     exit 1
 fi
 
-MODEL_NAME=$1
-IMPORTANCE=$2
-STRACE=$3
-SENTENCE_LENGTH=$4
-NB_DATA=$5
-CHUNK_SIZE=$6
-START_STAGE=${7:-1}  # Default to 1 if not provided
-END_STAGE=${8:-4}    # Default to 4 if not provided
+PARTITION=$1
+MODEL_NAME=$2
+IMPORTANCE=$3
+STRACE=$4
+SENTENCE_LENGTH=$5
+NB_DATA=$6
+CHUNK_SIZE=$7
+START_STAGE=${8:-1}  # Default to 1 if not provided
+END_STAGE=${9:-4}    # Default to 4 if not provided
+
 
 MAX_CONCURRENT_JOBS=50 # Fairness: Don't run more than 50 jobs at once
-EXCLUDED_NODES="node044,node042"
+# EXCLUDED_NODES="node044,node042"
+EXCLUDED_NODES="node033,node034,node035,node036,node037,node038,node039,node040,node042,node043,node044" # only use node041
 
 echo "--- Configuration ---"
+echo "GPU Partition: $PARTITION"
 echo "Model Name: $MODEL_NAME"
 echo "Importance: $IMPORTANCE"
 echo "Strace: $STRACE"
@@ -55,6 +60,10 @@ echo "Start Stage: $START_STAGE"
 echo "End Stage: $END_STAGE"
 echo "---------------------"
 
+PARTITION_FLAGS="--partition=$PARTITION --qos=alien"
+# if [ "$PARTITION" = "alien" ]; then
+#     PARTITION_FLAGS="--partition=alien --qos=alien"
+# fi
 
 # --- 2. Configuration & File/Directory Setup ---
 
@@ -105,8 +114,10 @@ export TOTAL_SENTENCES=$TOTAL_SENTENCES
 # Define all directory paths with SANITIZED_MODEL_NAME
 BASE_OUTPUT_DIR="$(pwd)/results_${IMPORTANCE}_${STRACE}/${SANITIZED_MODEL_NAME}"
 export INTERMEDIATE_DIR="${BASE_OUTPUT_DIR}/intermediate_graphs_${SENTENCE_LENGTH}"
-export STRACE_DIR="${BASE_OUTPUT_DIR}/intermediate_straces_${SENTENCE_LENGTH}"
-export FINAL_DIR="${BASE_OUTPUT_DIR}/final_straces_${SENTENCE_LENGTH}"
+# export STRACE_DIR="${BASE_OUTPUT_DIR}/intermediate_straces_${SENTENCE_LENGTH}"
+export STRACE_DIR="${BASE_OUTPUT_DIR}/final_straces_${SENTENCE_LENGTH}"
+# export FINAL_DIR="${BASE_OUTPUT_DIR}/final_straces_${SENTENCE_LENGTH}"
+export FINAL_DIR="${BASE_OUTPUT_DIR}/final_v2_straces_${SENTENCE_LENGTH}"
 export PDF_FILE="${BASE_OUTPUT_DIR}/strace_analysis_plots_${SENTENCE_LENGTH}.pdf"
 LOG_DIR="${BASE_OUTPUT_DIR}/slurm_logs_${SENTENCE_LENGTH}"
 
@@ -140,7 +151,11 @@ check_files() {
         echo "Error: Prerequisite check failed for $stage_name."
         echo "  Found $file_count files in $dir, but expected $expected_count (one per sentence)."
         echo "  Cannot skip to $stage_name. Please re-run previous stages."
-        exit 1
+        read -p "Do you want to continue anyway? (y/n) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
     fi
     echo "  Validation successful: Found $file_count files in $dir."
 }
@@ -153,11 +168,15 @@ LAST_JOB_ID="" # This will hold the ID of the *previous* stage
 # --- Stage 1: GPU Population ---
 if [ "$START_STAGE" -le 1 ] && [ "$END_STAGE" -ge 1 ]; then
     echo "Submitting Stage 1: GPU Population..."
+    # Set partition and QoS flags based on partition type
+
     GPU_JOB_ID=$(sbatch --parsable \
         --array=$ARRAY_RANGE \
+        $PARTITION_FLAGS \
         --export=ALL,INTERMEDIATE_DIR \
         --output="${LOG_DIR}/1_gpu_%A_%a.out" \
         --exclude=$EXCLUDED_NODES \
+        --job-name="${SANITIZED_MODEL_NAME}_strace_gpu" \
         1_SLURM_GPU.sh)
 
     if [ -z "$GPU_JOB_ID" ]; then
@@ -190,6 +209,7 @@ if [ "$START_STAGE" -le 2 ] && [ "$END_STAGE" -ge 2 ]; then
         --export=ALL,INTERMEDIATE_DIR,STRACE_DIR \
         --output="${LOG_DIR}/2_cpu_%A_%a.out" \
         --exclude=$EXCLUDED_NODES \
+        --job-name="${SANITIZED_MODEL_NAME}_strace_cpu" \
         2_SLURM_CPU.sh)
 
     if [ -z "$CPU_JOB_ID" ]; then
@@ -215,9 +235,11 @@ if [ "$START_STAGE" -le 3 ] && [ "$END_STAGE" -ge 3 ]; then
     GPU_JOB_ID_2=$(sbatch --parsable \
         --array=$ARRAY_RANGE \
         $DEP_FLAG \
+        $PARTITION_FLAGS \
         --export=ALL,STRACE_DIR,FINAL_DIR \
         --output="${LOG_DIR}/3_gpu_%A_%a.out" \
         --exclude=$EXCLUDED_NODES \
+        --job-name="${SANITIZED_MODEL_NAME}_eval_gpu" \
         3_SLURM_GPU.sh)
 
     if [ -z "$GPU_JOB_ID_2" ]; then
@@ -247,6 +269,7 @@ if [ "$START_STAGE" -le 4 ] && [ "$END_STAGE" -ge 4 ]; then
         --export=ALL,FINAL_DIR,PDF_FILE \
         --output="${LOG_DIR}/4_plot_%j.out" \
         --exclude=$EXCLUDED_NODES \
+        --job-name="${SANITIZED_MODEL_NAME}_plot" \
         SLURM_PLOT.sh)
     
     if [ -z "$PLOT_JOB_ID" ]; then

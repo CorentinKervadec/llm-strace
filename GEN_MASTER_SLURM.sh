@@ -41,7 +41,7 @@ END_STAGE=${8:-3}
 # --- 2. Fixed Parameters (Adjust here if needed) ---
 export BATCH_SIZE=1
 export P_SAMPLE=0.6
-MAX_CONCURRENT_JOBS=50
+MAX_CONCURRENT_JOBS=100
 EXCLUDED_NODES="node044,node042"
 
 echo "--- Configuration ---"
@@ -103,6 +103,7 @@ if [ "$START_STAGE" -le 1 ] && [ "$END_STAGE" -ge 1 ]; then
         --export=ALL \
         --output="${LOG_DIR}/1_gpu_%A_%a.out" \
         --exclude=$EXCLUDED_NODES \
+        --job-name="${SANITIZED_MODEL_NAME}_strace_gpu" \
         1_GEN_SLURM_GPU.sh)
     
     if [ -z "$GPU_JOB_ID" ]; then echo "Error submitting Stage 1"; exit 1; fi
@@ -126,6 +127,7 @@ if [ "$START_STAGE" -le 2 ] && [ "$END_STAGE" -ge 2 ]; then
         --export=ALL \
         --output="${LOG_DIR}/2_cpu_%A_%a.out" \
         --exclude=$EXCLUDED_NODES \
+        --job-name="${SANITIZED_MODEL_NAME}_strace_cpu" \
         2_GEN_SLURM_CPU.sh)
 
     if [ -z "$CPU_JOB_ID" ]; then echo "Error submitting Stage 2"; exit 1; fi
@@ -148,6 +150,7 @@ if [ "$START_STAGE" -le 3 ] && [ "$END_STAGE" -ge 3 ]; then
         --export=ALL \
         --output="${LOG_DIR}/3_gpu_%A_%a.out" \
         --exclude=$EXCLUDED_NODES \
+        --job-name="${SANITIZED_MODEL_NAME}_eval_gpu" \
         3_GEN_SLURM_GPU.sh)
 
     if [ -z "$GPU_JOB_ID_2" ]; then echo "Error submitting Stage 3"; exit 1; fi
