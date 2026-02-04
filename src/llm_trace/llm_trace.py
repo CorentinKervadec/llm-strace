@@ -619,6 +619,20 @@ class LLM_STRACE:
             print(f"{stratum:<5}{c_in_str:<10}{threshold:<25.3e}{rel_size:<15.0%}{raw_size:<15.2e}{tv:<15.2e}{nu:<15}{top5_nucleus_str:<25}{inv_nu:<15}{inv_top5_nucleus_str:<25}{r_nu:<15}{r_inv_nu:<15}")
 
 
+    def print_graph_sizes_and_thresholds_short(self):
+        """
+        Prints the size of each stratum alongside its corresponding threshold value.
+        """
+        print(f"[STRACE] Displaying threshold and graph size:\n{'S':<5}{'c-input?':<10}{'Threshold':<25}{'Size (rel)':<15}{'Size (raw)':<15}{'TV':<15}{'Nucleus':<15}{'N60 (top 5)':<25}")
+        print("-" * 9 * 25)
+        for stratum, threshold, rel_size, raw_size, c_in, tv, nu, n60 in zip(
+            self.strata_index, self.strata_tau, self.strata_rel_size, self.strata_raw_size, self.strata_connected_to_input, 
+            self.strata_reco_tv['trace']['only'], self.strata_reco_nu['trace']['only'], self.strata_nucleus_60['trace']['only']):
+            top5_nucleus_str = repr('|'.join(n60[:5]))
+            c_in_str = 'yes' if c_in else 'no'
+            print(f"{stratum:<5}{c_in_str:<10}{threshold:<25.3e}{rel_size:<15.0%}{raw_size:<15.2e}{tv:<15.2e}{nu:<15}{top5_nucleus_str:<25}")
+
+
     def compute_stratum_reconstruction_error(self, do_random=False, do_inverse=False):
         output = self.llm_hooked.forward_with_graph(self.input_tuple, self.graph, inverse=False, keep_residual=False, output_logit=True)  
         full_logits = output[4]
@@ -850,14 +864,37 @@ def load_from_file_light(file_path: str, llm_hooked: LLM_Hooked):
         # Load the compressed .npz file
         # allow_pickle=True is required to load dicts and non-array objects
         data = np.load(file_path, allow_pickle=True)
-        if isinstance(data['input'], str):
-            input_tuple = (data['input'].item(), data['next_token'].item())
-        elif isinstance(data['input'], np.ndarray):
-            input_ids = torch.tensor(data['input'])
+        # print("Keys found in the npz file:", list(data.keys()))
+        raw_input = data['input']
+
+        # 1. Handle 0-d array (scalar) which usually holds the string
+        if isinstance(raw_input, np.ndarray) and raw_input.ndim == 0:
+            # .item() converts the 0-d array back to a Python scalar (str)
+            decoded_input = raw_input.item()
+            input_tuple = (decoded_input, data['next_token'].item())
+
+        # 2. Handle actual arrays of strings (dtype kind 'U' or 'S')
+        elif isinstance(raw_input, np.ndarray) and raw_input.dtype.kind in ('U', 'S'):
+            # If it was saved as a 1D array of strings, use .item() if it has only 1 element
+            if raw_input.size == 1:
+                input_tuple = (raw_input.item(), data['next_token'].item())
+            else:
+                # Handle list of strings if necessary, or error out
+                raise ValueError("Input is a multi-element string array.")
+
+        # 3. Handle numeric arrays (Token IDs)
+        elif isinstance(raw_input, np.ndarray) and raw_input.dtype.kind in ('u', 'i'):
+            input_ids = torch.tensor(raw_input)
+            # Assuming MockTokenized is defined elsewhere
             mock_tokenized = MockTokenized(input_ids, torch.zeros_like(input_ids))
             input_tuple = (mock_tokenized, data['next_token'].item())
+
+        # 4. Handle plain Python strings (rare in npz but possible depending on save method)
+        elif isinstance(raw_input, str):
+            input_tuple = (raw_input, data['next_token'].item())
+
         else:
-            raise ValueError(f"[LLM TRACE LOAD] Input in wrong format: {data['input']}")
+            raise ValueError(f"[LLM TRACE LOAD] Input in wrong format: {type(raw_input)}")
         # --- 1. Reconstruct the graph ---
         
         # Start with an empty graph and set attributes
