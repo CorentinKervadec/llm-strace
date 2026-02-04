@@ -75,7 +75,7 @@ def main(model_name):
     # half_precision: If True (recommended), load the model in float16 to save VRAM.
     # Set to False for higher precision (float32).
     # For some reason, half_precision might cause approximation error that you don't have with full precision
-    half_precision = False 
+    half_precision = True 
     
     # untrained: If True, load a "blank" model with randomized weights
     # for debugging or analysis. /!\ Not tested
@@ -89,21 +89,24 @@ def main(model_name):
     # batch_size: How many operations to batch together during the
     # graph population step (e.g., attention decomposition).
     # Reduce the batch size if you get memory issues.
-    batch_size = 32
+    batch_size = 1
     
     # strace_mode: The algorithm used to extract subgraphs (strata).
     # 'nucleus': (Recommended) Keeps the most important incoming edges
     #            that sum up to a cumulative mass 'tau' (like Top-P).
     # 'threshold': Keeps all edges with a weight strictly greater than 'tau'.
-    strace_mode = 'nucleus'
+    strace_mode = 'threshold'
     
     # threshold_values: A manually defined list of 'tau' values.
     # The script will extract one stratum for each value in this list.
     # Values represent the cumulative probability mass for 'nucleus' mode,
     # or the raw weight cutoff for 'threshold' mode.
+    # threshold_values = [
+    #     1.0, .9995, .999, .995, .99, .985, .98, .975, .97, .96, .95,
+    #     .9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1
+    # ]
     threshold_values = [
-        1.0, .9995, .999, .995, .99, .985, .98, .975, .97, .96, .95,
-        .9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1
+        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
     ]
     
     # --- 3. Initialize the Hooked Model ---
@@ -129,7 +132,7 @@ def main(model_name):
     
     # Enable internal sanity checks (e.g., asserting that
     # decomposed vectors sum back to the original vector).
-    llm_hooked.turn_test_mode_on()
+    # llm_hooked.turn_test_mode_on()
 
     # --- 4. Main Processing Loop ---
     # Iterate over each sentence in the selected test dataset.
