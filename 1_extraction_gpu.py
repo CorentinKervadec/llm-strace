@@ -3,6 +3,7 @@ import os
 import time
 from src.llm_trace.llm_trace import LLM_STRACE
 from src.llm_hooked.hook_constructors import get_hooked_constructor
+import re
 
 def load_sentence(data_file, index):
     """Loads a specific line (sentence) from the .tsv data file."""
@@ -39,7 +40,13 @@ def main():
     half_precision = True
     untrained = False
     importance_mode = args.importance
-    batch_size = 8
+
+    match = re.search(r'(\d+)B', args.model_name)
+    model_size = int(match.group(1)) if match else None
+    if model_size > 10:
+        batch_size = 1
+    else:
+        batch_size = 8
 
     # --- Initialise Model (on GPU) - ONCE per job ---
     print(f"[GPU-JOB CHUNK {args.chunk_id}] Loading model...")

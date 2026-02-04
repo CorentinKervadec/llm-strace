@@ -31,7 +31,8 @@ def main():
     for sentence_index in range(start_index, end_index):
         # --- Load Intermediate State (from CPU stage) ---
         # strace_file = os.path.join(args.strace_dir, f'strace_{sentence_index}.pickle')
-        strace_file = os.path.join(args.strace_dir, f'strace_{sentence_index}.npz')
+        # strace_file = os.path.join(args.strace_dir, f'strace_{sentence_index}.npz')
+        strace_file = os.path.join(args.strace_dir, f'strace_final_{sentence_index}.npz')
         if not os.path.exists(strace_file):
             print(f"[GPU-JOB-2 {sentence_index}] ERROR: No strace file found at {strace_file}. Skipping.")
             continue
@@ -45,7 +46,7 @@ def main():
         # --- Run GPU-bound Reconstruction Error ---
         print(f"[GPU-JOB-2 {sentence_index}] Starting stratum reconstruction error calculation...")
         start_time = time.time()
-        strace.compute_stratum_reconstruction_error()
+        strace.compute_stratum_reconstruction_error(do_random=True, do_inverse=True)
         print(f"[GPU-JOB-2 {sentence_index}] Time to compute stratum reco error: {time.time() - start_time:.2f} s")
 
         strace.print_graph_sizes_and_thresholds()

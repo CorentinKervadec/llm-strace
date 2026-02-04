@@ -12,38 +12,58 @@ from collections import defaultdict
 PROMPTS_FILE = "data/meta_prompts_v2.csv"
 IMPORTANCE_MODE = "norm"
 STRACE_MODE = "threshold"
-MAX_NEW_TOKENS = 20
 START_STAGE = 1
 END_STAGE = 3
-NUM_SEEDS = 2
+NUM_SEEDS = 1
 
 # -- Throttling & Priority Settings --
-SEED_SUBMISSION_DELAY = 5    # Seconds to wait between seeds (avoids rapid-fire submission)
-MODEL_SUBMISSION_DELAY = 1    # Seconds to wait between switching models
-SLURM_NICE_VALUE = "1000"     # Higher value = LOWER priority. (Standard user range usually 0-10000)
+SEED_SUBMISSION_DELAY = 60    # Seconds to wait between seeds (avoids rapid-fire submission)
+MODEL_SUBMISSION_DELAY = 5    # Seconds to wait between switching models
+SLURM_NICE_VALUE = "0"     # Higher value = LOWER priority. (Standard user range usually 0-10000)
 
 # -- File Paths --
-LOG_FILE = "multi_model_experiment_1.log"
-STATE_FILE = "experiment_state_1.json" # To save progress in case of crash
+LOG_FILE = "multi_model_experiment_6.log"
+STATE_FILE = "experiment_state_6.json" # To save progress in case of crash
 
 AVAILABLE_MODELS = [
-    # "mistralai/Mistral-7B-v0.1",
-    # 'allenai/OLMo-2-0425-1B',
-    # "allenai/OLMo-2-1124-7B",
-    # "allenai/OLMo-2-1124-13B",
+    "mistralai/Mistral-7B-v0.1",
+    'allenai/OLMo-2-0425-1B',
+    "allenai/OLMo-2-1124-7B",
+    "allenai/OLMo-2-1124-13B",
     "Qwen/Qwen3-0.6B-Base",
-    # "Qwen/Qwen3-1.7B-Base",
-    # "Qwen/Qwen3-4B-Base",
-    # "Qwen/Qwen3-8B-Base",
-    # "Qwen/Qwen2.5-0.5B",
-    # "Qwen/Qwen2.5-1.5B",
-    # "Qwen/Qwen2.5-3B",
-    # "Qwen/Qwen2.5-7B",
-    # "Qwen/Qwen2.5-14B",
-    # "Qwen/Qwen2-0.5B",
-    # "Qwen/Qwen2-1.5B",
-    # "Qwen/Qwen2-7B",
+    "Qwen/Qwen3-1.7B-Base",
+    "Qwen/Qwen3-4B-Base",
+    "Qwen/Qwen3-8B-Base",
+    "Qwen/Qwen2.5-0.5B",
+    "Qwen/Qwen2.5-1.5B",
+    "Qwen/Qwen2.5-3B",
+    "Qwen/Qwen2.5-7B",
+    "Qwen/Qwen2.5-14B",
+    "Qwen/Qwen2-0.5B",
+    "Qwen/Qwen2-1.5B",
+    "Qwen/Qwen2-7B",
 ]
+SHORT_L=20
+MEDIUM_L=30
+LONG_L=30
+LENGTH_PER_MODEL = {
+    "Qwen/Qwen2-0.5B": LONG_L,
+    "Qwen/Qwen2-1.5B": LONG_L,
+    "Qwen/Qwen2-7B": MEDIUM_L,
+    "Qwen/Qwen2.5-0.5B": LONG_L,
+    "Qwen/Qwen2.5-1.5B": LONG_L,
+    "Qwen/Qwen2.5-14B": SHORT_L,
+    "Qwen/Qwen2.5-3B": LONG_L,
+    "Qwen/Qwen2.5-7B": MEDIUM_L,
+    "Qwen/Qwen3-0.6B-Base": LONG_L,
+    "Qwen/Qwen3-1.7B-Base": LONG_L,
+    "Qwen/Qwen3-4B-Base": MEDIUM_L,
+    "Qwen/Qwen3-8B-Base": MEDIUM_L,
+    "allenai/OLMo-2-0425-1B": LONG_L,
+    "allenai/OLMo-2-1124-13B": SHORT_L,
+    "allenai/OLMo-2-1124-7B": MEDIUM_L,
+    "mistralai/Mistral-7B-v0.1": MEDIUM_L,
+}
 
 # --- Helper Functions ---
 
@@ -74,32 +94,73 @@ def load_state():
     return {}
 
 def submit_job(model, seed):
-    """
-    Submits the GEN_MASTER_SLURM.sh script.
-    """
     cmd = [
         "./GEN_MASTER_SLURM.sh",
         model,
         PROMPTS_FILE,
         IMPORTANCE_MODE,
         STRACE_MODE,
-        str(MAX_NEW_TOKENS),
+        str(LENGTH_PER_MODEL.get(model, MEDIUM_L)), # Added .get() safety
         str(seed),
         str(START_STAGE),
         str(END_STAGE)
     ]
     
-    # Inject Nice value into environment for this subprocess
     env = os.environ.copy()
     if SLURM_NICE_VALUE:
         env["SBATCH_NICE"] = SLURM_NICE_VALUE
 
-    try:
-        # Run subprocess with the modified environment
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True, env=env)
-        output = result.stdout.strip()
+    MAX_RETRIES = 100
+    BASE_WAIT = 60
+    LONG_WAIT = BASE_WAIT * 60
+
+    for attempt in range(MAX_RETRIES):
+        t0 = time.time()
         
-        # Regex to capture Job ID.
+        # We initialize output vars to ensure scope availability
+        output = ""
+        
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True, env=env)
+            output = result.stdout.strip()
+            # If we reach here, return code was 0 (clean success)
+
+        except subprocess.CalledProcessError as e:
+            # --- THE FIX ---
+            # The script failed (non-zero exit), BUT it might have already printed the Job ID.
+            # We must check stdout before deciding to retry.
+            output = e.stdout.strip() if e.stdout else ""
+            err_msg = e.stderr.strip() if e.stderr else "No stderr"
+            
+            # Check if we actually got IDs despite the crash
+            if "Job ID" in output:
+                log(f"WARNING: Script exited with error {e.returncode} but Job IDs were found. Treating as SUCCESS.")
+                log(f"  (Ignored Error: {err_msg})")
+                # We do NOT continue loop; we fall through to the parsing logic below
+            else:
+                # Genuine failure (no Job ID found). Handle retries/timeouts.
+                elapsed = time.time() - t0
+                
+                is_congestion = any(x in err_msg for x in [
+                    "temporarily unavailable",
+                    "Socket timed out",
+                    "temporarily unable to accept job",
+                    "Connection refused",
+                    "due to system load"
+                ])
+                
+                if is_congestion:
+                    wait_time = LONG_WAIT if elapsed > 60 else BASE_WAIT * (attempt + 1)
+                    log(f"Slurm Congestion detected (Time: {int(elapsed)}s). Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue # Retry loop
+                else:
+                    # Fatal error (e.g. invalid arguments), unlikely to be fixed by retrying
+                    log(f"ERROR: Fatal error submitting {model} (Seed {seed})")
+                    log(f"  Stderr: {err_msg}")
+                    return None
+
+        # --- PARSING LOGIC (Shared for Clean Success AND recovered 'Failed' Success) ---
         job_ids = re.findall(r'Job ID:\s*(\d+)', output)
         
         if job_ids:
@@ -107,20 +168,68 @@ def submit_job(model, seed):
             current_stage = START_STAGE
             for jid in job_ids:
                 if current_stage <= END_STAGE:
-                    job_map[str(current_stage)] = jid # Use string keys for JSON compatibility
+                    job_map[str(current_stage)] = jid
                     current_stage += 1
             
             stages_str = ", ".join([f"S{s}:{jid}" for s, jid in job_map.items()])
             log(f"SUCCESS: Submitted {model} (Seed {seed}) -> {stages_str}")
             return job_map
         else:
-            log(f"WARNING: Submitted {model} (Seed {seed}) but parsing JobID failed. Output:\n{output}")
+            # If check=True passed (exit 0) but regex found nothing, something is weird.
+            log(f"WARNING: Script finished successfully but parsing JobID failed. Output:\n{output}")
             return None
 
-    except subprocess.CalledProcessError as e:
-        log(f"ERROR: Failed to submit {model} (Seed {seed})")
-        log(f"  Stderr: {e.stderr}")
-        return None
+    log(f"CRITICAL: Failed to submit {model} after {MAX_RETRIES} attempts. Skipping.")
+    return None
+
+# def submit_job(model, seed):
+#     """
+#     Submits the GEN_MASTER_SLURM.sh script.
+#     """
+#     cmd = [
+#         "./GEN_MASTER_SLURM.sh",
+#         model,
+#         PROMPTS_FILE,
+#         IMPORTANCE_MODE,
+#         STRACE_MODE,
+#         str(LENGTH_PER_MODEL[model]),
+#         str(seed),
+#         str(START_STAGE),
+#         str(END_STAGE)
+#     ]
+    
+#     # Inject Nice value into environment for this subprocess
+#     env = os.environ.copy()
+#     if SLURM_NICE_VALUE:
+#         env["SBATCH_NICE"] = SLURM_NICE_VALUE
+
+#     try:
+#         # Run subprocess with the modified environment
+#         result = subprocess.run(cmd, capture_output=True, text=True, check=True, env=env)
+#         output = result.stdout.strip()
+        
+#         # Regex to capture Job ID.
+#         job_ids = re.findall(r'Job ID:\s*(\d+)', output)
+        
+#         if job_ids:
+#             job_map = {}
+#             current_stage = START_STAGE
+#             for jid in job_ids:
+#                 if current_stage <= END_STAGE:
+#                     job_map[str(current_stage)] = jid # Use string keys for JSON compatibility
+#                     current_stage += 1
+            
+#             stages_str = ", ".join([f"S{s}:{jid}" for s, jid in job_map.items()])
+#             log(f"SUCCESS: Submitted {model} (Seed {seed}) -> {stages_str}")
+#             return job_map
+#         else:
+#             log(f"WARNING: Submitted {model} (Seed {seed}) but parsing JobID failed. Output:\n{output}")
+#             return None
+
+#     except subprocess.CalledProcessError as e:
+#         log(f"ERROR: Failed to submit {model} (Seed {seed})")
+#         log(f"  Stderr: {e.stderr}")
+#         return None
 
 def batch_list(iterable, n=1):
     """Yields successive n-sized chunks from iterable."""

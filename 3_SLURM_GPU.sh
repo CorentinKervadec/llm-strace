@@ -7,9 +7,7 @@
 #SBATCH --mem=32G                # Job memory request
 #SBATCH --time=05:00:00          # Time limit (2 hours, adjust for 100 sentences)
 #SBATCH --gpus=1                 # Request 1 GPU
-#SBATCH --gpus=1                 # Request 1 GPU
-#SBATCH --partition=alien
-#SBATCH --qos=alien
+
 
 # --- This script is submitted by submit_jobs.sh ---
 # --- It expects $SLURM_ARRAY_TASK_ID to be set (as chunk_id) ---

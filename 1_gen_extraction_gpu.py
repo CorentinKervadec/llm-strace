@@ -127,8 +127,8 @@ def main():
     # --- Initialize STRACE once ---
     # Note: We pass 'xxx' as target string because we are only populating the graph 
     # based on the *current* context. The target doesn't matter for the forward pass hooks.
-    strace = LLM_STRACE((initial_text_tokenized, 'xxx'), llm_hooked, track_time=False)
-    strace.initialize_graph(importance_mode=args.importance_mode)
+    # strace = LLM_STRACE((initial_text_tokenized, 'xxx'), llm_hooked, track_time=False)
+    # strace.initialize_graph(importance_mode=args.importance_mode)
 
     new_last_token_id = None # will be updated after the first step
 
@@ -140,12 +140,19 @@ def main():
             llm_hooked.register_extraction_hooks()
         
         # 3. Trace (Forward Pass + Graph Extraction)
-        if step==0: # first step: full pass, build the graph from scratch
-            strace.populate_graph(batch_size=args.batch_size, print_stats=False)
-        else: # incrementally
-            # todo: update the populate_graph function to add the start index
-            strace.update_trace(new_last_token_id, batch_size=args.batch_size, print_stats=False)
+        # if step==0: # first step: full pass, build the graph from scratch
+        #     strace.populate_graph(batch_size=args.batch_size, print_stats=False)
+        # else: # incrementally
+        #     # todo: update the populate_graph function to add the start index
+        #     strace.update_trace(new_last_token_id, batch_size=args.batch_size, print_stats=False)
         
+        # we do the original version, that recompute the full graph
+        initial_text_tokenized.input_ids = full_text_tokenized
+        initial_text_tokenized.attention_mask = torch.ones_like(full_text_tokenized)
+        strace = LLM_STRACE((initial_text_tokenized, 'xxx'), llm_hooked, track_time=False)
+        strace.initialize_graph(importance_mode=args.importance_mode)
+        strace.populate_graph(batch_size=args.batch_size, print_stats=False)
+
         # 4. Sampling
         # We reuse the logits computed during the trace to avoid a second forward pass
         logits = strace.original_logits.cpu()

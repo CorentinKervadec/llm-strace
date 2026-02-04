@@ -7,8 +7,7 @@
 #SBATCH --mem=64G                # Job memory request
 #SBATCH --time=05:00:00          # Time limit (2 hours, adjust for 100 sentences)
 #SBATCH --gpus=1                 # Request 1 GPU
-#SBATCH --partition=alien
-#SBATCH --qos=alien
+
 
 
 # --- This script is submitted by submit_jobs.sh ---
