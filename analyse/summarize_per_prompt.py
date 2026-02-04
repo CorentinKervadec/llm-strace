@@ -50,7 +50,8 @@ def extract_metrics_from_npz(data):
         return {
             'auc_tv': auc_tv,
             'entropy': full_entropy,
-            'raw_size': raw_size
+            'raw_size': raw_size,
+            'raw_tv': raw_tv,
         }
     except Exception as e:
         return None
@@ -110,7 +111,7 @@ def load_generation_tsv(prompt_path):
                 # We need at least the 4 numeric columns at the end.
                 # If the string column contained tabs, len(parts) > 5.
                 # We simply grab the last 4 elements safely.
-                if len(parts) < 5:
+                if len(parts) < 4:
                     continue 
 
                 # Right-to-Left parsing for safety
@@ -171,6 +172,8 @@ def load_model_data_parallel(model_name, prompt_name, seed, prompt_path, min_fil
                 })
 
             sentence_metrics[step] = combined
+    
+    # print(f"[PARALLEL LOADING] Done: {prompt_path}")
 
     return sentence_metrics
 
@@ -188,7 +191,7 @@ def write_tsv_summary(aggregated_data, output_file):
     metric_keys = [
         'auc_tv', 'entropy', 'gen_entropy', 
         'next_token_id', 'next_token_prob', 'nucleus_token_id', 
-        'raw_size'
+        'raw_size', 'raw_tv'
     ]
     header = ['prompt_name', 'seed', 'step'] + metric_keys
 
@@ -218,20 +221,31 @@ def write_tsv_summary(aggregated_data, output_file):
                         formatted = ""
                         if v is None:
                             formatted = ""
+                        elif k.endswith('_id'):
+                            # Keep ID-like fields as raw strings (don't format as floats)
+                            formatted = str(v)
                         elif isinstance(v, (list, tuple, np.ndarray)):
                             try:
-                                formatted = str(list(v))
+                                elems = list(v)
+                                formatted_items = []
+                                for e in elems:
+                                    try:
+                                        fe = float(e)
+                                        if np.isfinite(fe):
+                                            formatted_items.append(f"{fe:.6e}")
+                                        else:
+                                            formatted_items.append("")
+                                    except Exception:
+                                        formatted_items.append(str(e))
+                                formatted = "[" + ", ".join(formatted_items) + "]"
                             except Exception:
                                 formatted = str(v)
                         else:
                             try:
                                 fv = float(v)
                                 if np.isfinite(fv):
-                                    # Don't format IDs as floats
-                                    if k.endswith('_id'):
-                                        formatted = str(v)
-                                    else:
-                                        formatted = f"{fv:.6f}"
+                                    # Use scientific notation for floats
+                                    formatted = f"{fv:.6e}"
                                 else:
                                     formatted = ""
                             except Exception:
@@ -266,6 +280,8 @@ def main():
     # Outer loop over models
     for model_path in tqdm(sorted(model_dirs), desc="Models"):
         model_name = os.path.basename(model_path)
+        if model_name != 'Qwen2-7B':
+            continue
         aggregated_data = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
         
         seed_dirs = [os.path.join(model_path, d) 

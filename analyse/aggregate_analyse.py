@@ -11,6 +11,8 @@ import warnings
 import re
 from scipy.stats import pearsonr, gaussian_kde
 
+FONTSIZE=22
+
 # --- 1. Data Loading Functions ---
 
 def load_token_counts(file_path):
@@ -79,8 +81,8 @@ def load_model_data(model_dir, count_file_path=None):
 
     # Find all .npz files
     file_paths = glob.glob(os.path.join(model_dir, '*.npz'))
-    if len(file_paths) < 666:
-        print(f"  Skipping {os.path.basename(model_dir)}: Not enough files ({len(file_paths)} < 666)")
+    if len(file_paths) < 4900:
+        print(f"  Skipping {os.path.basename(model_dir)}: Not enough files ({len(file_paths)} < 4900)")
         return None
 
     print(f"  Loading {len(file_paths)} files from {os.path.basename(model_dir)}...")
@@ -152,7 +154,7 @@ def load_model_data(model_dir, count_file_path=None):
             continue
 
     n_valid = np.sum(np.isfinite(sentence_data["loss"]) & np.isfinite(sentence_data["entropy"]))
-    if n_valid < 666: 
+    if n_valid < 4900: 
         print(f"... Only {n_valid} valid loss & entropy: skipping.")
         return None # model not valid
             
@@ -206,7 +208,7 @@ def plot_correlation_summary(all_models_data, output_pdf):
                 bars = ax.bar(x_pos, correlations, color='skyblue', edgecolor='black', alpha=0.7)
                 
                 ax.set_ylabel(f"Pearson Correlation (r)")
-                ax.set_title(f"Correlation: {y_key} vs. AUC({x_key})")
+                # ax.set_title(f"Correlation: {y_key} vs. AUC({x_key})")
                 ax.set_xticks(x_pos)
                 ax.set_xticklabels(model_names, rotation=45, ha='right')
                 ax.axhline(0, color='black', linewidth=0.8)
@@ -218,7 +220,7 @@ def plot_correlation_summary(all_models_data, output_pdf):
                     ax.text(bar.get_x() + bar.get_width()/2., height + offset,
                             f"p={p_val:.1e}",
                             ha='center', va='bottom' if height >= 0 else 'top', 
-                            fontsize=9, rotation=0, color='darkred')
+                            fontsize=FONTSIZE, rotation=0, color='darkred')
                 
                 plt.tight_layout()
                 pdf.savefig(fig)
@@ -286,10 +288,10 @@ def plot_model_size_scatter(all_models_data, output_pdf):
                 # Add text labels for specific models next to their dots
                 for x, y, name in zip(f_data['x'], f_data['y'], f_data['names']):
                     # Offset slightly to avoid overlapping the dot
-                    ax.text(x, y, name, fontsize=8, ha='left', va='bottom', 
+                    ax.text(x, y, name, fontsize=FONTSIZE, ha='left', va='bottom', 
                             rotation=15, alpha=0.7)
 
-            ax.set_title(f"Model Comparison: Mean AUC({auc_key}) vs Model Size")
+            # ax.set_title(f"Model Comparison: Mean AUC({auc_key}) vs Model Size")
             ax.set_xlabel("Model Size (Parameters in Billions)")
             ax.set_ylabel(f"Mean AUC ({auc_key})")
             ax.grid(True, linestyle='--', alpha=0.6)
@@ -411,7 +413,7 @@ def plot_auc_distributions(all_models_data, output_pdf):
                     print(f"  Error computing KDE for {model_name}: {e}")
                     continue
 
-            ax.set_title(f"Normalized Distribution of AUC Scores: {auc_key}")
+            # ax.set_title(f"Normalized Distribution of AUC Scores: {auc_key}")
             ax.set_xlabel(f"AUC ({auc_key})")
             ax.set_ylabel("Normalized Density (Peak = 1.0)")
             ax.legend(title="Model")
@@ -420,22 +422,23 @@ def plot_auc_distributions(all_models_data, output_pdf):
             pdf.savefig(fig)
             plt.close(fig)
 
+
 def plot_model_correlation_matrix(all_model_traces, output_pdf, significance_threshold=0.05):
     """
-    Computes and plots the pairwise correlation matrix of TV AUC scores between all models.
-    Only displays correlation values text if the p-value is < significance_threshold.
+    Computes and plots the lower-triangular pairwise correlation matrix 
+    of TV AUC scores between all models.
     """
     print(f"Generating Model Correlation Matrix Plot -> {output_pdf}...")
 
     # 1. Gather all common sentence AUCs
-    auc_data = defaultdict(lambda: defaultdict(float)) # model_name -> file_name -> auc_tv
+    auc_data = defaultdict(lambda: defaultdict(float)) 
     common_sentences = None
 
     for model_name, sentence_data in all_model_traces.items():
-        current_sentences = set(sentence_data['id'])
         # remove sentences which have non-finite auc values
         current_auc = np.array(sentence_data['auc']['strata_reco_tv_trace_only'])
         finite_mask = np.isfinite(current_auc)
+        # Use simple indexing to get IDs associated with finite values
         current_sentences = {sentence_data['id'][i] for i in np.where(finite_mask)[0]}
         
         if common_sentences is None:
@@ -456,7 +459,6 @@ def plot_model_correlation_matrix(all_model_traces, output_pdf, significance_thr
 
     # 2. Build correlation AND p-value matrices
     N = len(all_model_traces)
-    # Initialize matrices with identity (for corr) and zeros (for p-val, implying diagonal is significant)
     matrices = {
         'pearson': {'corr': np.eye(N), 'p': np.zeros((N, N))},
         'spearman': {'corr': np.eye(N), 'p': np.zeros((N, N))}
@@ -464,7 +466,6 @@ def plot_model_correlation_matrix(all_model_traces, output_pdf, significance_thr
     
     model_labels = list(all_model_traces.keys())
     
-    # Extract AUC vectors for common files
     auc_vectors = {}
     for model_name in model_labels:
         vector = np.array([auc_data[model_name][f] for f in common_sentences])
@@ -486,43 +487,61 @@ def plot_model_correlation_matrix(all_model_traces, output_pdf, significance_thr
             matrices['spearman']['corr'][i, j] = matrices['spearman']['corr'][j, i] = s_corr
             matrices['spearman']['p'][i, j] = matrices['spearman']['p'][j, i] = s_val
 
-    # 3. Plot the Heatmap
+    # 3. Plot the Heatmap (Triangular)
     with PdfPages(output_pdf) as pdf:
         for mode in ['pearson', 'spearman']:
             fig, ax = plt.subplots(figsize=(12, 10))
             
-            corr_matrix = matrices[mode]['corr']
+            # Make a copy so we don't destroy the data for the next loop iteration if needed
+            corr_matrix = matrices[mode]['corr'].copy()
             p_matrix = matrices[mode]['p']
 
-            # We cap the color scale from 0.0 to 1.0
+            # --- CHANGE 1: Create a mask for the upper triangle ---
+            # k=1 hides the upper triangle but keeps the diagonal. 
+            # If you want to hide the diagonal too, use k=0.
+            mask = np.triu(np.ones_like(corr_matrix, dtype=bool), k=1)
+            
+            # Set upper triangle to NaN (Matplotlib renders NaNs as transparent/white)
+            corr_matrix[mask] = np.nan
+
             c = ax.imshow(corr_matrix, cmap='viridis', vmin=0.0, vmax=1.0) 
 
             # Add correlation values to the cells
             for i in range(N):
                 for j in range(N):
+                    # --- CHANGE 2: Only iterate through the lower triangle ---
+                    if i < j: 
+                        continue
+
                     val = corr_matrix[i, j]
                     p_val = p_matrix[i, j]
                     
-                    # Logic: Always print diagonal (i==j), otherwise check significance
                     if i == j or p_val < significance_threshold:
-                        # Ensure text is readable, maybe white for dark colors
+                        # Ensure text is readable
                         color_text = 'white' if val > 0.9 else 'black' 
                         text_content = f"{val:.3f}"
                     else:
-                        # If not significant, print empty string (or "ns")
                         text_content = "" 
 
                     ax.text(j, i, text_content,
-                            ha="center", va="center", color=color_text, fontsize=8)
+                            ha="center", va="center", color=color_text, fontsize=FONTSIZE)
 
             # Set labels and title
             ax.set_xticks(np.arange(N))
             ax.set_yticks(np.arange(N))
-            ax.set_xticklabels(model_labels, rotation=45, ha='right', fontsize=8)
-            ax.set_yticklabels(model_labels, fontsize=8)
-            ax.tick_params(top=False, bottom=True, labeltop=False, labelbottom=True)
+            ax.set_xticklabels(model_labels, rotation=45, ha='right', fontsize=FONTSIZE)
+            ax.set_yticklabels(model_labels, fontsize=12)
+            
+            # --- CHANGE 3: Clean up borders (Spines) ---
+            # Remove top and right spines since that area is empty now
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            
+            # Ensure ticks are only on bottom and left
+            ax.tick_params(top=False, bottom=True, left=True, right=False,
+                           labeltop=False, labelbottom=True)
 
-            ax.set_title(f"Pairwise {mode.capitalize()} Correlation of Sentence TV AUCs\n(Values hidden if p >= {significance_threshold})", pad=20)
+            # ax.set_title(f"Pairwise {mode.capitalize()} Correlation of Sentence TV AUCs\n(Values hidden if p >= {significance_threshold})", pad=20)
             
             # Add a color bar
             cbar = fig.colorbar(c, ax=ax, fraction=0.046, pad=0.04)
@@ -531,6 +550,118 @@ def plot_model_correlation_matrix(all_model_traces, output_pdf, significance_thr
             plt.tight_layout()
             pdf.savefig(fig)
             plt.close(fig)
+
+# def plot_model_correlation_matrix(all_model_traces, output_pdf, significance_threshold=0.05):
+#     """
+#     Computes and plots the pairwise correlation matrix of TV AUC scores between all models.
+#     Only displays correlation values text if the p-value is < significance_threshold.
+#     """
+#     print(f"Generating Model Correlation Matrix Plot -> {output_pdf}...")
+
+#     # 1. Gather all common sentence AUCs
+#     auc_data = defaultdict(lambda: defaultdict(float)) # model_name -> file_name -> auc_tv
+#     common_sentences = None
+
+#     for model_name, sentence_data in all_model_traces.items():
+#         current_sentences = set(sentence_data['id'])
+#         # remove sentences which have non-finite auc values
+#         current_auc = np.array(sentence_data['auc']['strata_reco_tv_trace_only'])
+#         finite_mask = np.isfinite(current_auc)
+#         current_sentences = {sentence_data['id'][i] for i in np.where(finite_mask)[0]}
+        
+#         if common_sentences is None:
+#             common_sentences = current_sentences
+#         else:
+#             common_sentences = common_sentences.intersection(current_sentences)
+
+#     for model_name, sentence_data in all_model_traces.items():
+#         for i, sentence_id in enumerate(sentence_data['id']):
+#             if sentence_id in common_sentences:
+#                 auc_data[model_name][sentence_id] = sentence_data['auc']['strata_reco_tv_trace_only'][i]
+
+#     if not common_sentences:
+#         print("No common sentence files found across all models. Cannot compute correlation.")
+#         return
+#     else:
+#         print(f"Found {len(common_sentences)} common sentences to compute correlation.")
+
+#     # 2. Build correlation AND p-value matrices
+#     N = len(all_model_traces)
+#     # Initialize matrices with identity (for corr) and zeros (for p-val, implying diagonal is significant)
+#     matrices = {
+#         'pearson': {'corr': np.eye(N), 'p': np.zeros((N, N))},
+#         'spearman': {'corr': np.eye(N), 'p': np.zeros((N, N))}
+#     }
+    
+#     model_labels = list(all_model_traces.keys())
+    
+#     # Extract AUC vectors for common files
+#     auc_vectors = {}
+#     for model_name in model_labels:
+#         vector = np.array([auc_data[model_name][f] for f in common_sentences])
+#         auc_vectors[model_name] = vector
+
+#     # Calculate pairwise correlation
+#     for i in range(N):
+#         for j in range(i + 1, N):
+#             model_i = model_labels[i]
+#             model_j = model_labels[j]
+            
+#             # Pearson
+#             p_corr, p_val = pearsonr(auc_vectors[model_i], auc_vectors[model_j])
+#             matrices['pearson']['corr'][i, j] = matrices['pearson']['corr'][j, i] = p_corr
+#             matrices['pearson']['p'][i, j] = matrices['pearson']['p'][j, i] = p_val
+
+#             # Spearman
+#             s_corr, s_val = spearmanr(auc_vectors[model_i], auc_vectors[model_j])
+#             matrices['spearman']['corr'][i, j] = matrices['spearman']['corr'][j, i] = s_corr
+#             matrices['spearman']['p'][i, j] = matrices['spearman']['p'][j, i] = s_val
+
+#     # 3. Plot the Heatmap
+#     with PdfPages(output_pdf) as pdf:
+#         for mode in ['pearson', 'spearman']:
+#             fig, ax = plt.subplots(figsize=(12, 10))
+            
+#             corr_matrix = matrices[mode]['corr']
+#             p_matrix = matrices[mode]['p']
+
+#             # We cap the color scale from 0.0 to 1.0
+#             c = ax.imshow(corr_matrix, cmap='viridis', vmin=0.0, vmax=1.0) 
+
+#             # Add correlation values to the cells
+#             for i in range(N):
+#                 for j in range(N):
+#                     val = corr_matrix[i, j]
+#                     p_val = p_matrix[i, j]
+                    
+#                     # Logic: Always print diagonal (i==j), otherwise check significance
+#                     if i == j or p_val < significance_threshold:
+#                         # Ensure text is readable, maybe white for dark colors
+#                         color_text = 'white' if val > 0.9 else 'black' 
+#                         text_content = f"{val:.3f}"
+#                     else:
+#                         # If not significant, print empty string (or "ns")
+#                         text_content = "" 
+
+#                     ax.text(j, i, text_content,
+#                             ha="center", va="center", color=color_text, fontsize=8)
+
+#             # Set labels and title
+#             ax.set_xticks(np.arange(N))
+#             ax.set_yticks(np.arange(N))
+#             ax.set_xticklabels(model_labels, rotation=45, ha='right', fontsize=8)
+#             ax.set_yticklabels(model_labels, fontsize=8)
+#             ax.tick_params(top=False, bottom=True, labeltop=False, labelbottom=True)
+
+#             ax.set_title(f"Pairwise {mode.capitalize()} Correlation of Sentence TV AUCs\n(Values hidden if p >= {significance_threshold})", pad=20)
+            
+#             # Add a color bar
+#             cbar = fig.colorbar(c, ax=ax, fraction=0.046, pad=0.04)
+#             cbar.set_label(f'{mode.capitalize()} Correlation Coefficient (r)', rotation=-90, va="bottom")
+
+#             plt.tight_layout()
+#             pdf.savefig(fig)
+#             plt.close(fig)
 
 # --- 3. Main ---
 
