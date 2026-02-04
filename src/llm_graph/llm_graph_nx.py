@@ -128,7 +128,12 @@ class LLM_Graph_NX(nx.MultiDiGraph):
         """
         super().__init__(**attr)
         self.llm_hooked = llm_hooked
-        self.input_sentence = input_sentence.copy() if input_sentence is not None else None
+        if isinstance(input_sentence, str):
+            self.input_sentence = input_sentence
+        elif input_sentence is None:
+            self.input_sentence = None
+        else:
+            self.input_sentence = input_sentence.copy()
         if llm_hooked is not None:
             self.architecture_type = llm_hooked.get_architecture_type()
             self.model_input, n_tokens = self.preprocess_input_sentence()
