@@ -573,7 +573,7 @@ class LLM_Hooked():
                     if isinstance(reconstruct_decoder_output, tuple):
                         reconstruct_decoder_output = reconstruct_decoder_output[0]
                     sanity_check.sanity_check_decoder(original_decoder_output, reconstruct_decoder_output, self.half_precision)
-                    print(f"[LLM Hooked][Layer {layer_index}] Decoder output reconstruction sanity check succesfully passed.")
+                    # print(f"[LLM Hooked][Layer {layer_index}] Decoder output reconstruction sanity check succesfully passed.")
 
                 # Replace the original output with the masked output.
                 output = masked_decoder_outputs
@@ -795,10 +795,10 @@ class LLM_Hooked():
         elif hasattr(sentence, 'input_ids'):
             input_ids = sentence.input_ids.long()
             full_sentence_tokens = torch.cat([input_ids, torch.tensor(tokenized_next_word).unsqueeze(0)], dim=1)
-        
+            attention_mask = sentence.attention_mask
         # send to model's device
         input_ids = input_ids.to(self.model.device)
-        attention_mask = sentence.attention_mask.to(self.model.device)
+        attention_mask = attention_mask.to(self.model.device)
 
         labels = torch.full_like(input_ids, -100)
         labels[0, -1] = full_sentence_tokens[0, -1]
