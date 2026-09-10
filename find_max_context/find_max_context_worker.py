@@ -4,12 +4,18 @@ import torch
 from pathlib import Path
 
 # Add project root to path
-sys.path.append(str(Path(__file__).resolve().parent))
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
 
-from src.llm_hooked.hook_constructors import get_hooked_constructor
-from src.llm_trace.llm_trace import LLM_STRACE
+from src.llm_trace.llm_trace_2 import LLM_STRACE
+from src.modified_transformers.utils import get_model_class, identify_model_type
+from transformers import AutoTokenizer
+from accelerate import cpu_offload
 
-def run_trace_step(llm_hooked, context_length, batch_size):
+CPU_OFFLOAD = True
+
+# adapted to new code
+def run_trace_step(llm, tokenizer, context_length, batch_size):
     """
     Runs the critical path of the user's script to test memory usage.
     Returns True if successful, False if OOM.
@@ -17,49 +23,28 @@ def run_trace_step(llm_hooked, context_length, batch_size):
     try:
         # 1. Create Dummy Input
         # We generate random token IDs up to the vocab size.
-        vocab_size = llm_hooked.tokenizer.vocab_size
+        vocab_size = tokenizer.vocab_size
         dummy_input_ids = torch.randint(0, vocab_size, (1, context_length))
-        
-        # Mock attention mask (all ones)
-        dummy_attention_mask = torch.ones_like(dummy_input_ids)
-        
-        # Bundle into a dictionary/object similar to tokenizer output if needed, 
-        # or pass directly if LLM_STRACE handles tensors. 
-        # Based on your snippet, LLM_STRACE accepts the tokenized object.
-        class MockTokenized:
-            def __init__(self, ids, mask):
-                self.input_ids = ids
-                self.attention_mask = mask
-        
-        current_text_tokenized = MockTokenized(dummy_input_ids, dummy_attention_mask)
-
-        # 2. Register Hooks
-        if not llm_hooked.extraction_hook_registred():
-            llm_hooked.register_extraction_hooks()
-
+        dummy_sentence = tokenizer.decode(dummy_input_ids[0])        
         # 3. Initialize STRACE (The wrapper)
-        # We pass a dummy 'gt_next' string as it doesn't impact memory of the graph population
-        strace = LLM_STRACE((current_text_tokenized, 'dummy_target'), llm_hooked, track_time=False)
-        
-        # 4. Initialize Graph Structure
-        strace.initialize_graph(importance_mode='norm')
-        
-        # 5. Populate Graph (The Memory Bottleneck)
+        strace = LLM_STRACE(
+            sentence=dummy_sentence,
+            next_word='x', 
+            llm=llm, 
+            tokenizer=tokenizer,
+            track_time=False)
+                # 5. Populate Graph (The Memory Bottleneck)
         # This is where the heavy forward pass and gradient/activation storage happens
-        strace.populate_graph(batch_size=batch_size, print_stats=False)
-        
+        strace.populate_graph(batch_size, importance_mode='norm')
         # 6. Extract strace
         strace.extract_strace([0.99], mode='threshold')
-
         # 7. Evaluate trace
-        llm_hooked.remove_extraction_hooks()
         strace.compute_stratum_reconstruction_error(do_random=False, do_inverse=False)
 
         # 8. Cleanup immediately to free memory for next test
         # (Simulate the graph saving/destruction)
         strace.graph.clear()
         del strace       
-        del current_text_tokenized
         
         return True
 
@@ -69,6 +54,67 @@ def run_trace_step(llm_hooked, context_length, batch_size):
         print(f"\n[Warning] Unexpected error at length {context_length}: {e}")
         # If it's not memory related, we might want to raise, but for this test assume failure
         return False
+
+# def run_trace_step(llm_hooked, context_length, batch_size):
+#     """
+#     Runs the critical path of the user's script to test memory usage.
+#     Returns True if successful, False if OOM.
+#     """
+#     try:
+#         # 1. Create Dummy Input
+#         # We generate random token IDs up to the vocab size.
+#         vocab_size = llm_hooked.tokenizer.vocab_size
+#         dummy_input_ids = torch.randint(0, vocab_size, (1, context_length))
+        
+#         # Mock attention mask (all ones)
+#         dummy_attention_mask = torch.ones_like(dummy_input_ids)
+        
+#         # Bundle into a dictionary/object similar to tokenizer output if needed, 
+#         # or pass directly if LLM_STRACE handles tensors. 
+#         # Based on your snippet, LLM_STRACE accepts the tokenized object.
+#         class MockTokenized:
+#             def __init__(self, ids, mask):
+#                 self.input_ids = ids
+#                 self.attention_mask = mask
+        
+#         current_text_tokenized = MockTokenized(dummy_input_ids, dummy_attention_mask)
+
+#         # 2. Register Hooks
+#         if not llm_hooked.extraction_hook_registred():
+#             llm_hooked.register_extraction_hooks()
+
+#         # 3. Initialize STRACE (The wrapper)
+#         # We pass a dummy 'gt_next' string as it doesn't impact memory of the graph population
+#         strace = LLM_STRACE((current_text_tokenized, 'dummy_target'), llm_hooked, track_time=False)
+        
+#         # 4. Initialize Graph Structure
+#         strace.initialize_graph(importance_mode='norm')
+        
+#         # 5. Populate Graph (The Memory Bottleneck)
+#         # This is where the heavy forward pass and gradient/activation storage happens
+#         strace.populate_graph(batch_size=batch_size, print_stats=False)
+        
+#         # 6. Extract strace
+#         strace.extract_strace([0.99], mode='threshold')
+
+#         # 7. Evaluate trace
+#         llm_hooked.remove_extraction_hooks()
+#         strace.compute_stratum_reconstruction_error(do_random=False, do_inverse=False)
+
+#         # 8. Cleanup immediately to free memory for next test
+#         # (Simulate the graph saving/destruction)
+#         strace.graph.clear()
+#         del strace       
+#         del current_text_tokenized
+        
+#         return True
+
+#     except torch.cuda.OutOfMemoryError:
+#         return False
+#     except Exception as e:
+#         print(f"\n[Warning] Unexpected error at length {context_length}: {e}")
+#         # If it's not memory related, we might want to raise, but for this test assume failure
+#         return False
 
 def main():
     parser = argparse.ArgumentParser()
@@ -81,11 +127,29 @@ def main():
     # Run exactly ONE test
     try:
         # Setup model...
-        HOOKED_CONSTRUCTOR = get_hooked_constructor(args.model_name)
-        llm_hooked = HOOKED_CONSTRUCTOR(args.model_name, half_precision=True, untrained=False)
+        model_type = identify_model_type(args.model_name)
+        hf_constructor = get_model_class(model_type)
+        
+        if CPU_OFFLOAD:
+            llm = hf_constructor.from_pretrained(
+                args.model_name,
+                attn_implementation="eager",
+                torch_dtype=torch.float16,
+            )
+            llm = cpu_offload(llm, execution_device="cuda:0")
+        else:
+            llm = hf_constructor.from_pretrained(
+                args.model_name,
+                device_map="auto",
+                # max_memory={0: "22GB", "cpu": "60GB"}, # Leave 2GB GPU RAM free for your hidden_states/activations
+                attn_implementation="eager",
+                torch_dtype=torch.float16,
+            )
+
+        tokenizer = AutoTokenizer.from_pretrained(args.model_name)
 
         # Run trace...
-        success = run_trace_step(llm_hooked, args.context_len, 1)
+        success = run_trace_step(llm, tokenizer, args.context_len, 1)
         
         if success:
             print("SUCCESS")

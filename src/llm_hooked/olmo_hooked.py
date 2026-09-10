@@ -19,6 +19,7 @@ Important details from Olmo architecture:
 - QK norm
 """
 
+
 def Olmo2Attention_masked(
     module,
     hidden_states,
@@ -310,3 +311,12 @@ class Olmo2_Hooked(LLM_Hooked):
 
     def get_final_norm(self):
         return self.model.model.norm
+    
+    def get_embed(self):
+        return self.model.model.embed_tokens
+    
+    def get_lm_head(self):
+        return self.model.lm_head
+    
+    def get_rotary(self):
+        return self.model.model.rotary_emb

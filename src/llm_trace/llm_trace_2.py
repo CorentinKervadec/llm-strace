@@ -1,6 +1,7 @@
-from src.llm_graph.llm_graph_nx import LLM_Graph_NX, load_from_dict
-from src.llm_hooked.llm_hooked import LLM_Hooked
-from src.llm_graph.graph_utils import get_graph_constructor
+from src.llm_graph.llm_graph_nx_light import LLM_Graph_NX, load_from_dict
+from src.llm_trace.mask_utils import prepare_mask
+from transformers.modeling_utils import PreTrainedModel
+# from src.llm_graph.graph_utils import get_graph_constructor
 import networkx as nx
 import time
 from tqdm import tqdm
@@ -12,6 +13,9 @@ import pickle
 import networkx.readwrite.json_graph as json_graph
 import collections
 import os
+import torch.nn.functional as F
+from src.test.unit_tests import MaskingError
+import heapq
 
 EPS = 1e-6
 
@@ -29,7 +33,7 @@ THRESHOLD_STRACE = {
         .9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1
     ],
     'ifr_threshold': [
-        1e-8, 1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+        1e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 2e-2, 3e-2, 4e-2, 5e-2, 0.1, 0.2, 0.3, 0.4, 0.8, 1.0
     ],
     'sim_nucleus': [
         1.0, .9995, .999, .995, .99, .985, .98, .975, .97, .96, .95,
@@ -39,47 +43,86 @@ THRESHOLD_STRACE = {
         1e-4, 5e-4, 1e-3, 2e-3, 3e-3, 4e-3, 5e-3, 1e-2, 0.1, 0.2, 0.4, 0.8, 1.0
     ],
     'norm_threshold': [
-        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+        1e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 2e-2, 3e-2, 4e-2, 5e-2, 0.1, 0.2, 0.3, 0.4, 0.8, 1.0
     ],
     'norm_l2_threshold': [
-        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+        1e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 2e-2, 3e-2, 4e-2, 5e-2, 0.1, 0.2, 0.3, 0.4, 0.8, 1.0
     ],
     'cosim_threshold': [
-        0.1, 0.2, 0.3, 0.35, 0.4, 0.425, 0.45, 0.475, 0.49, 0.5, 0.51, 0.525, 0.55, 0.575, 0.6, 0.65, 0.7, 0.8, 0.9, 1.0
+       0.4, 0.425, 0.45, 0.475, 0.49, 0.5, 0.51, 0.525, 0.55, 0.575, 0.6, 0.625, 0.65, 0.7, 0.8, 0.9, 1.0
     ],
     'lev_256_threshold':
     [
-        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 6e-3, 8e-3, 1e-2, 0.1, 0.4, 1.0
     ],
     'lev_128_threshold':
     [
-        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 6e-3, 8e-3, 1e-2, 0.1, 0.4, 1.0
     ],
     'lev_64_threshold':
     [
-        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 6e-3, 8e-3, 1e-2, 0.1, 0.4, 1.0
     ],
     'lev_32_threshold':
     [
-        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+        1e-7, 1e-6, 1e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 2e-2, 3e-2, 4e-2, 5e-2, 0.1, 0.2, 0.8
     ],
     'lev_16_threshold':
     [
-        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+        1e-7, 1e-6, 1e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 2e-2, 3e-2, 4e-2, 5e-2, 0.1, 0.2, 0.8
     ],
     'lev_8_threshold':
     [
-        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+        1e-9, 1e-7, 1e-6, 1e-5, 1e-4, 5e-4, 1e-3, 2e-3, 3e-3, 4e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.8
     ],
     'lev_4_threshold':
     [
-        1e-8, 1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+        1e-9, 1e-7, 1e-6, 1e-5, 1e-4, 5e-4, 1e-3, 2e-3, 3e-3, 4e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.8
     ],
     'lev_2_threshold':
     [
-        1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+        1e-9, 1e-7, 1e-6, 1e-5, 1e-4, 5e-4, 1e-3, 2e-3, 3e-3, 4e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.8
     ],
 }
+
+EPS = 1e-7
+
+def surprisal(logits, labels):
+    """
+    Compute cross-entropy loss, entropy, predicted token id, and ground truth rank.
+
+    Args:
+        logits (torch.Tensor): Logits from the model (shape: [batch_size * seq_len, vocab_size]).
+        labels (torch.Tensor): Ground truth token ids (shape: [batch_size, seq_len]).
+
+    Returns:
+        tuple: (loss, entropy, predicted_token_id, rank)
+    """
+    # Compute cross-entropy loss, ignoring padding
+    loss = None
+    if labels is not None:
+        loss = F.cross_entropy(logits, labels.view(-1).cpu(), ignore_index=-100).item()
+
+    # Compute probabilities for the last token
+    probabilities = torch.softmax(logits[-1].float(), dim=-1)
+    entropy = -torch.sum(probabilities * torch.log(probabilities + EPS)).item()
+
+    # Predicted token id (highest probability)
+    predicted_token_id = torch.argmax(probabilities).item()
+
+    # Ground truth token id (last label in the sequence)
+    ground_truth_token_id = None
+    if labels is not None:
+        ground_truth_token_id = labels[0, -1].item()
+
+    # Compute rank of the ground truth token
+    sorted_indices = torch.argsort(probabilities, descending=True)
+    rank = None
+    if labels is not None:
+        rank = (sorted_indices == ground_truth_token_id).nonzero(as_tuple=True)[0].item() + 1
+
+    return loss, entropy, predicted_token_id, rank
+
 
 class MockTokenized:
     def __init__(self, ids, mask):
@@ -143,7 +186,9 @@ def get_intersection_nucleus(original_logits,graph_logits):
     sorted_graph_indices = np.argsort(graph_probs)[::-1]
     cumulative_graph = np.cumsum(graph_probs[sorted_graph_indices])
     # print("Get nucleus")
+    # print("sorted_indices", sorted_indices)
     # print("cumulative_orig", cumulative_orig)
+    # print("sorted_graph_indices", sorted_graph_indices)
     # print("cumulative_graph", cumulative_graph)
 
     p_candidates = [1, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 99]
@@ -163,8 +208,10 @@ def get_intersection_nucleus(original_logits,graph_logits):
             shared_nucleus = p
             nucleus_size = len(orig_top_indices)
             break
-    # print("orig_top_indices", orig_top_indices)
-    # print("graph_top_indices", graph_top_indices)
+    # print(f"orig_top_indices [{p}]", orig_top_indices)
+    # print(f"graph_top_indices [{p}]", graph_top_indices)
+    # print("shared_nucleus", shared_nucleus)
+    # print("nucleus_size", nucleus_size)
     return shared_nucleus, nucleus_size
 
 def get_nucleus(logits: torch.Tensor, p: float) -> torch.Tensor:
@@ -217,28 +264,31 @@ def get_nucleus(logits: torch.Tensor, p: float) -> torch.Tensor:
     # The nucleus set is the opposite of the "remove" mask
     mask_to_keep_sorted = torch.logical_not(mask_to_remove_sorted)
     
-    # --- 6. Map Back to Original Indices ---
-    # We now have the correct True/False mask, but it's relative
-    # to the *sorted* order. We need to "un-sort" it to match
-    # the original logit tensor's order.
+
+    # # --- 6. Map Back to Original Indices ---
+    # # We now have the correct True/False mask, but it's relative
+    # # to the *sorted* order. We need to "un-sort" it to match
+    # # the original logit tensor's order.
     
-    # Create an empty boolean mask with the same shape as probs
-    final_mask = torch.zeros_like(mask_to_keep_sorted)
+    # # Create an empty boolean mask with the same shape as probs
+    # final_mask = torch.zeros_like(mask_to_keep_sorted)
     
-    # Use scatter_ to place the True/False values at their
-    # original positions.
-    final_mask.scatter_(dim=-1, index=sorted_indices, src=mask_to_keep_sorted)
+    # # Use scatter_ to place the True/False values at their
+    # # original positions.
+    # final_mask.scatter_(dim=-1, index=sorted_indices, src=mask_to_keep_sorted)
     
-    # --- 7. Format Output ---
-    # Return a 1D tensor of indices
-    return torch.where(final_mask)[0]
+    # # --- 7. Format Output ---
+    # # Return a 1D tensor of indices
+    # return torch.where(final_mask)[0]
+    return sorted_indices[mask_to_keep_sorted]
+
 
 class LLM_STRACE:
     """
     Represents the model's stratified trace, a subgraph of the full computational graph.
     STRACE := Stratified TRACE
     """
-    def __init__(self, input_tuple, llm_hooked: LLM_Hooked, track_time=False):
+    def __init__(self, sentence: str = None, next_word: str | None = None, llm: PreTrainedModel = None, tokenizer=None, track_time=False):
         # we consider three stratification: by size (relatively to the full graph), by reconstruction error, by importance score (tau)
         self.graph = None
         self.strata_rel_size: List[int] = []
@@ -248,15 +298,55 @@ class LLM_STRACE:
         self.strata_connected_to_input: List[bool] = [] # bool that tells if the stratum is connected to the input
         self.strata_reco_tv = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
         self.strata_reco_nu = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
+        self.strata_size_nu = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
         self.strata_nucleus_60 = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
+        self.strata_nucleus_60_tkn = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
         self.strata_loss = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
         self.strata_entropy = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
+        self.strata_logits = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
         self.track_time = track_time
-        self.input_tuple = input_tuple
         self.original_logits = None # the logit prediction from the full model
-        self.llm_hooked = llm_hooked
+        self.llm = llm
+        self.tokenizer = tokenizer
+        self.input_prepared = self.prepare_input(sentence, next_word)
         self.nb_strata = None
         self.frozen = None
+
+    def prepare_input(self, sentence, next_word):
+        if sentence is None:
+            return None
+        # Ensure next_word starts with a space
+        if not next_word.startswith(' '):
+            next_word = ' ' + next_word
+
+        # Tokenize next_word and ensure it's a single token
+        tokenized_next_word = self.tokenizer.encode(next_word, add_special_tokens=False)
+        if len(tokenized_next_word) != 1:
+            tokenized_next_word = [tokenized_next_word[0]]
+
+        # Tokenize the sentence and concatenate with next_word token
+        if isinstance(sentence, str):
+            sentence_tokens = self.tokenizer(sentence, return_tensors="pt").input_ids
+            full_sentence_tokens = torch.cat([sentence_tokens, torch.tensor(tokenized_next_word).unsqueeze(0)], dim=1)
+            # Prepare model inputs and labels
+            input_ids = full_sentence_tokens[:, :-1]
+            attention_mask = torch.ones_like(input_ids)
+        elif hasattr(sentence, 'input_ids'):
+            input_ids = sentence.input_ids.long()
+            full_sentence_tokens = torch.cat([input_ids, torch.tensor(tokenized_next_word).unsqueeze(0)], dim=1)
+            attention_mask = sentence.attention_mask
+        # # send to model's device
+        # input_ids = input_ids.to(self.llm.device)
+        # attention_mask = attention_mask.to(self.model.device)
+
+        labels = torch.full_like(input_ids, -100)
+        labels[0, -1] = full_sentence_tokens[0, -1]
+
+        # Sanity checks
+        assert labels[0, -1] == full_sentence_tokens[0, -1], "Labels should be the last token of the full sentence"
+        assert input_ids[0, -1] == full_sentence_tokens[0, -2], "Input IDs should be the penultimate token"
+
+        return input_ids, attention_mask, labels
 
     def freeze_strace(self, component_prefix_name):
         self.frozen = component_prefix_name
@@ -273,39 +363,28 @@ class LLM_STRACE:
     def reset_evaluation(self):
         self.strata_reco_tv = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
         self.strata_reco_nu = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
+        self.strata_size_nu = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
         self.strata_nucleus_60 = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
+        self.strata_nucleus_60_tkn = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
+        self.strata_logits = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
         self.strata_loss = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
         self.strata_entropy = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
 
-    def initialize_graph(self, importance_mode):
-        self.graph = get_graph_constructor(self.llm_hooked.model_name)(
-            self.llm_hooked,
-            self.input_tuple[0],
-            importance_mode,
-        )
-
-    def populate_graph(self, batch_size, print_stats=True, start_token_idx=0):
-        original_logits = self.graph.populate_graph_with_importance(batch_size, start_token_idx)
-        self.original_logits = original_logits
+    def populate_graph(self, batch_size, importance_mode, print_stats=True, unit_test=False):
+        device = 'cuda'
+        with torch.no_grad():
+            output, graph = self.llm(
+                input_ids=self.input_prepared[0].to(device), 
+                attention_mask=self.input_prepared[1].to(device),
+                build_graph=importance_mode, unit_test=unit_test, attn_implementation="eager")
+        self.original_logits = output.logits
+        self.graph = graph
+        self.graph.remove_disconnected_nodes()
         if print_stats:
             stats = self.graph.get_edge_weight_stats()
             for (k,s) in stats.items():
                 print(f"[STRACE][GRAPH STATS] {k}: {s}")
     
-    def update_trace(self, new_last_token_id, batch_size, print_stats=True):
-        # update the input // we ignore the next token
-        # we assume that the input tuple was tokenized 
-        self.input_tuple[0].input_ids = torch.concat([self.input_tuple[0].input_ids, new_last_token_id], dim=-1)
-        self.input_tuple[0].attention_mask = torch.concat([self.input_tuple[0].attention_mask, torch.ones_like(new_last_token_id)], dim=-1)
-        # reset the trace metrics
-        self.reset_strace()
-        # update the graph
-        self.graph.add_new_last_token(new_last_token_id)
-        # repopulate the graph, updating only the last token
-        start_token_idx = self.input_tuple[0].input_ids.size(-1) - 1
-        self.populate_graph(batch_size, print_stats, start_token_idx)
-
-
     def label_graph_with_stratum(self, initial_graph: LLM_Graph_NX, tau: float, stratum_index: int, mode: str):
         """
         Filters initial_graph to create a connected subgraph and labels
@@ -323,6 +402,14 @@ class LLM_STRACE:
     
         Returns a connected subgraph of initial graph.
         """
+
+        # # 1. Grab just ONE edge to see what it actually looks like at this exact moment
+        # sample_edge = next(iter(initial_graph.edges(data=True)))
+        # print(f"[DEBUG LABELER] Sample edge data: {sample_edge}")
+
+        # # 2. Check the raw max of the key you are about to threshold
+        # max_w = max(d.get('weight') for u, v, d in initial_graph.edges(data=True))
+        # print(f"[DEBUG LABELER] Max 'weight' found: {max_w}")
 
         # Get the output node
         output_node = initial_graph.get_output_node()
@@ -352,6 +439,7 @@ class LLM_STRACE:
                 for u, v, k, d in initial_graph.edges(keys=True, data=True)
                 if condition(d)
             ]
+            # print(f"[{tau}] Nb edges to keep:", len(edges_to_keep))
 
         elif mode == 'nucleus':
 
@@ -446,6 +534,11 @@ class LLM_STRACE:
             initial_subgraph = initial_graph.subgraph([output_node])
             print("The filtered graph does not include the output node. The threshold might be too high.")
 
+        # FIX 4: Output explicit warning if isolation occurs
+        if output_node not in initial_subgraph:
+            print(f"[WARNING] Output node lost all incoming connections! Deleting {len(edges_to_keep)} valid upstream edges.")
+            initial_subgraph = initial_graph.subgraph([output_node])
+
         # Faster than nx.ancestor
         # reverse_tree = nx.bfs_tree(initial_subgraph, output_node, reverse=True)
         # connected_nodes = set(reverse_tree.nodes())
@@ -484,7 +577,118 @@ class LLM_STRACE:
         
         return subgraph, connected_to_input, time_stats
 
-    
+    def label_graph_with_strata_sizes(self, sigmas: list[float]):
+        """
+        Filters self.graph to create a connected subgraph and labels
+        the corresponding edges on `self.graph` with a stratum index from 0 to N-1.
+        
+        Returns:
+            stratum_sizes (list[int]): The exact number of edges assigned to each stratum label.
+            is_connected_list (list[bool]): True if the cumulative subgraph at stratum i is connected to an input node.
+            time_stats (dict): Performance timings.
+        """
+        output_node = self.graph.get_output_node()
+        input_nodes = set(self.graph.get_input_nodes()) # Convert to set for O(1) lookups
+
+        time_stats = {
+            'filtering': None,
+            'output connected': 0.0 # Implicitly solved by backward traversal
+        }
+
+        if self.track_time:
+            start_time = time.time()
+
+        # 1. Prepare target thresholds
+        total_edges = self.graph.number_of_edges()
+        sorted_sigmas = sorted(sigmas)
+        target_counts = [int(s * total_edges) for s in sorted_sigmas]
+        max_strata = len(target_counts)
+
+        edges_to_keep = set()
+        nodes_in_subgraph = {output_node}
+        edges_to_label = {}
+        
+        # New tracking variables
+        stratum_sizes = [0] * max_strata
+        min_stratum_connected = float('inf') 
+        
+        frontier_pq = []
+        edge_counter = 0
+
+        def add_in_edges_to_frontier(node):
+            nonlocal edge_counter
+            for u, v, k, d in self.graph.in_edges(node, data=True, keys=True):
+                weight = d.get('weight', 0.0)
+                
+                # Infinite priority for frozen components
+                if self.frozen is not None and d.get('name', '').startswith(self.frozen):
+                    weight = float('inf')
+                    
+                heapq.heappush(frontier_pq, (-weight, edge_counter, (u, v, k)))
+                edge_counter += 1
+
+        if output_node in self.graph:
+            add_in_edges_to_frontier(output_node)
+
+        # 2. Single-Pass Traversal
+        current_stratum = 0
+        
+        # Fast-forward if the first stratum size is exactly 0
+        while current_stratum < max_strata and target_counts[current_stratum] == 0:
+            current_stratum += 1
+
+        while frontier_pq and current_stratum < max_strata:
+            neg_weight, _, edge_key = heapq.heappop(frontier_pq)
+            
+            if edge_key in edges_to_keep:
+                continue
+                
+            edges_to_keep.add(edge_key)
+            
+            # Label the edge and increment the size counter for this specific stratum
+            edges_to_label[edge_key] = current_stratum
+            stratum_sizes[current_stratum] += 1
+            
+            # Check if this edge links back to an input node
+            source_node = edge_key[0]
+            if source_node in input_nodes:
+                if current_stratum < min_stratum_connected:
+                    min_stratum_connected = current_stratum
+            
+            # Check if adding this edge pushed us over the current size threshold
+            while current_stratum < max_strata and len(edges_to_keep) >= target_counts[current_stratum]:
+                current_stratum += 1 
+            
+            # Expand frontier
+            if source_node not in nodes_in_subgraph:
+                nodes_in_subgraph.add(source_node)
+                add_in_edges_to_frontier(source_node)
+
+        if self.track_time:
+            time_stats['filtering'] = time.time() - start_time
+
+        if len(edges_to_keep) < target_counts[-1]:
+            print(f"[WARNING] Exhausted connected edges at {len(edges_to_keep)}. Max target was {target_counts[-1]}.")
+
+        # 3. Build the boolean connection list
+        # If min_stratum_connected is 2, then strata 0 and 1 are False, and 2, 3, 4... are True.
+        is_connected_list = [(i >= min_stratum_connected) for i in range(max_strata)]
+
+        if self.track_time:
+            start_time = time.time()
+        
+        # 4. Apply Labels directly to the main graph
+        nx.set_edge_attributes(self.graph, values=edges_to_label, name='stratum')
+        
+        if self.track_time:
+            time_stats['labeling'] = time.time() - start_time
+        
+        stratum_sizes = [sum(stratum_sizes[:k+1]) for k in range(len(stratum_sizes))]
+
+        # No subgraph generated, just return the raw stats!
+        return stratum_sizes, is_connected_list, time_stats
+
+
     def extract_strace(self, threshold_values: list[float], mode: str):
         """
         Extract stratified traces at different weight thresholds.
@@ -503,7 +707,7 @@ class LLM_STRACE:
         self.nb_strata = len(threshold_values) + 1 # +1 because we also include the full graph
         stratum_index = self.nb_strata
         nx.set_edge_attributes(self.graph, values=stratum_index, name='stratum')
-        self.strata_tau = [1.0 if mode=='nucleus' else 0.0]
+        self.strata_tau = [1.0 if mode in ['nucleus', 'size'] else 0.0]
         self.strata_connected_to_input = [True]
         self.strata_raw_size = [self.graph.get_size()]
         self.strata_rel_size = [1.0]
@@ -519,64 +723,77 @@ class LLM_STRACE:
 
         if mode=='threshold':
             threshold_values.sort() # sort from low to high
+        elif mode=='size':
+            threshold_values.sort() # sort from low to high
         elif mode=='nucleus':
             threshold_values.sort(reverse=True) # sort from high to low
 
-        try:
-            pbar = tqdm(threshold_values, desc=f"[STRACE] Extracting strata | tau={threshold_values[0]:.6g}")
-            iterator = pbar
-        except Exception:
-            pbar = None
-            iterator = threshold_values
 
-        initial_graph = self.graph # start with the full graph
-
-        for threshold in iterator:
-            stratum_index = stratum_index - 1 # decrease the index
-
-            if self.track_time:
-                start_time = time.time()
-
-            # update progress bar description per-iteration (tqdm will advance automatically when used as the iterator)
-            if pbar is not None:
-                pbar.set_description(f"[STRACE] Extracting strata | tau={threshold:.6g}")
-
-            # Extract subgraph containing edges above threshold
-            subgraph, connected_to_input, time_stats = self.label_graph_with_stratum(initial_graph, threshold, stratum_index, mode)
-            initial_graph = subgraph # update the initial graph to save time on the next iteration (the initial graph will be smaller)
-            # Store both subgraph and its threshold
-            self.strata_tau = [threshold] + self.strata_tau
-            self.strata_connected_to_input = [connected_to_input] + self.strata_connected_to_input
+        if mode=='size':
+            stratum_sizes, is_connected_list, time_stats = self.label_graph_with_strata_sizes(sigmas=threshold_values)
+            self.strata_tau = threshold_values + self.strata_tau
+            self.strata_connected_to_input = is_connected_list + self.strata_connected_to_input
             # update size
-            self.strata_raw_size = [subgraph.get_size()] + self.strata_raw_size
-            self.strata_rel_size = [float(self.strata_raw_size[0])/self.strata_raw_size[-1]] + self.strata_rel_size
+            self.strata_raw_size = stratum_sizes + self.strata_raw_size
+            self.strata_rel_size = [s/self.strata_raw_size[-1] for s in stratum_sizes] + self.strata_rel_size
             # update strata index
-            self.strata_index = [stratum_index] + self.strata_index
+            self.strata_index = list(range(len(threshold_values))) + self.strata_index
+        else:
+            try:
+                pbar = tqdm(threshold_values, desc=f"[STRACE] Extracting strata | tau={threshold_values[0]:.6g}")
+                iterator = pbar
+            except Exception:
+                pbar = None
+                iterator = threshold_values
+
+            initial_graph = self.graph # start with the full graph
+
+            for threshold in iterator:
+                stratum_index = stratum_index - 1 # decrease the index
+
+                if self.track_time:
+                    start_time = time.time()
+
+                # update progress bar description per-iteration (tqdm will advance automatically when used as the iterator)
+                if pbar is not None:
+                    pbar.set_description(f"[STRACE] Extracting strata | tau={threshold:.6g}")
+
+                # Extract subgraph containing edges above threshold
+                subgraph, connected_to_input, time_stats = self.label_graph_with_stratum(initial_graph, threshold, stratum_index, mode)
+                initial_graph = subgraph # update the initial graph to save time on the next iteration (the initial graph will be smaller)
+                # Store both subgraph and its threshold
+                self.strata_tau = [threshold] + self.strata_tau
+                self.strata_connected_to_input = [connected_to_input] + self.strata_connected_to_input
+                # update size
+                self.strata_raw_size = [subgraph.get_size()] + self.strata_raw_size
+                self.strata_rel_size = [float(self.strata_raw_size[0])/self.strata_raw_size[-1]] + self.strata_rel_size
+                # update strata index
+                self.strata_index = [stratum_index] + self.strata_index
+
+                if self.track_time:
+                    end_time = time.time()
+                    # Store timing info for later statistics
+                    extraction_times.append(end_time - start_time)
+                    for key in time_stats:
+                        accu_time_stats[key].append(time_stats[key])
+
+            # ensure progress bar is closed if used
+            if pbar is not None:
+                try:
+                    pbar.close()
+                except Exception:
+                    pass
 
             if self.track_time:
-                end_time = time.time()
-                # Store timing info for later statistics
-                extraction_times.append(end_time - start_time)
-                for key in time_stats:
-                    accu_time_stats[key].append(time_stats[key])
-
-        # ensure progress bar is closed if used
-        if pbar is not None:
-            try:
-                pbar.close()
-            except Exception:
-                pass
-
-        if self.track_time:
-            avg_time = sum(extraction_times) / len(extraction_times)
-            max_time = max(extraction_times)
-            min_time = min(extraction_times)
-            print(f"[STRACE] Stratum extraction timing stats (seconds):")
-            print(f"[STRACE] Average: {avg_time:.3f}, Max: {max_time:.3f}, Min: {min_time:.3f}")
-            filtering_avg = sum(accu_time_stats['filtering']) / len(accu_time_stats['filtering'])
-            subgraph_avg = sum(accu_time_stats['subgraph']) / len(accu_time_stats['subgraph'])
-            output_avg = sum(accu_time_stats['output connected']) / len(accu_time_stats['output connected'])
-            print(f"[STRACE] Filtering: {filtering_avg:.3f}, Subgraph: {subgraph_avg:.3f}, Output: {output_avg:.3f} (all average)")
+                avg_time = sum(extraction_times) / len(extraction_times)
+                max_time = max(extraction_times)
+                min_time = min(extraction_times)
+                print(f"[STRACE] Stratum extraction timing stats (seconds):")
+                print(f"[STRACE] Average: {avg_time:.3f}, Max: {max_time:.3f}, Min: {min_time:.3f}")
+                filtering_avg = sum(accu_time_stats['filtering']) / len(accu_time_stats['filtering'])
+                subgraph_avg = sum(accu_time_stats['subgraph']) / len(accu_time_stats['subgraph'])
+                output_avg = sum(accu_time_stats['output connected']) / len(accu_time_stats['output connected'])
+                print(f"[STRACE] Filtering: {filtering_avg:.3f}, Subgraph: {subgraph_avg:.3f}, Output: {output_avg:.3f} (all average)")
 
 
     def auto_extract_strace(self, nb_stratum: int, log_tau: bool, mode: str):
@@ -621,28 +838,101 @@ class LLM_STRACE:
         # Extract strata using calculated thresholds
         self.extract_strace(threshold_values, mode)
 
-    # def compute_stratum_size(self):
-    #     full_size = self.graph.get_size()
-    #     self.strata_raw_size = [stratum.get_size() for stratum_index in range(self.nb_strata)]
-    #     self.strata_rel_size = [float(size)/float(full_size) for size in self.strata_raw_size]
-    #     return self.strata_rel_size
-
     def print_graph_sizes_and_thresholds(self):
         """
         Prints the size of each stratum alongside its corresponding threshold value.
+        Safely handles missing (None) values, missing dictionary keys, and empty lists.
         """
-        print(f"[STRACE] Displaying threshold and graph size:\n{'S':<5}{'c-input?':<10}{'Threshold':<25}{'Size (rel)':<15}{'Size (raw)':<15}{'TV':<15}{'Nucleus':<15}{'N60 (top 5)':<25}{'Inv. Nucleus':<15}{'inv-N60 (top 5)':<25}{'Rand. Nu.':<15}{'Inv. Rand. Nu.':<15}")
-        print("-" * 9 * 25)
-        for stratum, threshold, rel_size, raw_size, c_in, tv, nu, n60, inv_nu, inv_n60, r_nu, r_inv_nu in zip(
-            self.strata_index, self.strata_tau, self.strata_rel_size, self.strata_raw_size, self.strata_connected_to_input, 
-            self.strata_reco_tv['trace']['only'], self.strata_reco_nu['trace']['only'], self.strata_nucleus_60['trace']['only'], 
-            self.strata_reco_nu['trace']['inverse'], self.strata_nucleus_60['trace']['inverse'],
-            self.strata_reco_nu['random']['only'], self.strata_reco_nu['random']['inverse']):
-            top5_nucleus_str = repr('|'.join(n60[:5]))
-            inv_top5_nucleus_str = repr('|'.join(inv_n60[:5]))
-            c_in_str = 'yes' if c_in else 'no'
-            print(f"{stratum:<5}{c_in_str:<10}{threshold:<25.3e}{rel_size:<15.0%}{raw_size:<15.2e}{tv:<15.2e}{nu:<15}{top5_nucleus_str:<25}{inv_nu:<15}{inv_top5_nucleus_str:<25}{r_nu:<15}{r_inv_nu:<15}")
+        # Header setup
+        header = (
+            f"{'S':<5}{'c-input?':<10}{'Threshold':<25}{'Size (rel)':<15}{'Size (raw)':<15}"
+            f"{'TV':<15}{'Nucleus':<15}{'N60 (top 5)':<25}{'Inv. Nucleus':<15}"
+            f"{'inv-N60 (top 5)':<25}{'Rand. Nu.':<15}{'Inv. Rand. Nu.':<15}"
+        )
+        print(f"[STRACE] Displaying threshold and graph size:\n{header}")
+        print("-" * len(header))
+        
+        # 1. Determine target length (and handle case where strata_index itself is empty)
+        n_strata = len(self.strata_index) if self.strata_index else 0
+        if n_strata == 0:
+            print("No strata data available to display yet.")
+            return
 
+        # 2. Bulletproof helper function to extract and pad lists safely
+        def get_safe_list(source, key1=None, key2=None):
+            lst = source
+            # Safely navigate nested dictionaries
+            try:
+                if key1 is not None:
+                    lst = lst.get(key1) if isinstance(lst, dict) else lst[key1]
+                if key2 is not None and lst is not None:
+                    lst = lst.get(key2) if isinstance(lst, dict) else lst[key2]
+            except (KeyError, TypeError, AttributeError):
+                lst = None
+                
+            # If it's None or completely empty ([]), return a list of Nones
+            if not lst: 
+                return [None] * n_strata
+                
+            # If it has data, but is shorter than n_strata, pad the end with Nones
+            # (Prevents zip() from truncating valid rows)
+            if len(lst) < n_strata:
+                lst = list(lst) + [None] * (n_strata - len(lst))
+                
+            return lst
+
+        # 3. Extract ALL lists safely (even the ones we assume are safe)
+        tau_list = get_safe_list(self.strata_tau)
+        rel_size_list = get_safe_list(self.strata_rel_size)
+        raw_size_list = get_safe_list(self.strata_raw_size)
+        c_in_list = get_safe_list(self.strata_connected_to_input)
+        
+        tv_trace_only = get_safe_list(self.strata_reco_tv, 'trace', 'only')
+        nu_trace_only = get_safe_list(self.strata_reco_nu, 'trace', 'only')
+        n60_trace_only = get_safe_list(self.strata_nucleus_60, 'trace', 'only')
+        
+        inv_nu_list = get_safe_list(self.strata_reco_nu, 'trace', 'inverse')
+        inv_n60_list = get_safe_list(self.strata_nucleus_60, 'trace', 'inverse')
+        r_nu_list = get_safe_list(self.strata_reco_nu, 'random', 'only')
+        r_inv_nu_list = get_safe_list(self.strata_reco_nu, 'random', 'inverse')
+
+        # 4. Zip will now guaranteed run exactly n_strata times
+        for stratum, threshold, rel_size, raw_size, c_in, tv, nu, n60, inv_nu, inv_n60, r_nu, r_inv_nu in zip(
+            self.strata_index, tau_list, rel_size_list, raw_size_list, c_in_list,
+            tv_trace_only, nu_trace_only, n60_trace_only,
+            inv_nu_list, inv_n60_list, r_nu_list, r_inv_nu_list
+        ):
+            # 1. Handle booleans
+            if c_in is True:
+                c_in_str = 'yes'
+            elif c_in is False:
+                c_in_str = 'no'
+            else:
+                c_in_str = 'N/A'
+
+            # 2. Handle floats and scientific notation
+            threshold_str = f"{threshold:.3e}" if threshold is not None else "N/A"
+            rel_size_str = f"{rel_size:.0%}" if rel_size is not None else "N/A"
+            raw_size_str = f"{raw_size:.2e}" if raw_size is not None else "N/A"
+            tv_str = f"{tv:.2e}" if tv is not None else "N/A"
+
+            # 3. Handle list slicing and string joins
+            top5_nucleus_str = repr('|'.join(n60[:5])) if n60 is not None else "N/A"
+            inv_top5_nucleus_str = repr('|'.join(inv_n60[:5])) if inv_n60 is not None else "N/A"
+
+            # 4. Handle standard integers/floats that just need string conversion
+            nu_str = str(nu) if nu is not None else "N/A"
+            inv_nu_str = str(inv_nu) if inv_nu is not None else "N/A"
+            r_nu_str = str(r_nu) if r_nu is not None else "N/A"
+            r_inv_nu_str = str(r_inv_nu) if r_inv_nu is not None else "N/A"
+            stratum_str = str(stratum) if stratum is not None else "N/A"
+
+            # 5. Print the formatted row using string-only padding
+            print(
+                f"{stratum_str:<5}{c_in_str:<10}{threshold_str:<25}{rel_size_str:<15}{raw_size_str:<15}"
+                f"{tv_str:<15}{nu_str:<15}{top5_nucleus_str:<25}{inv_nu_str:<15}"
+                f"{inv_top5_nucleus_str:<25}{r_nu_str:<15}{r_inv_nu_str:<15}"
+            )
 
     def print_graph_sizes_and_thresholds_short(self):
         """
@@ -657,12 +947,7 @@ class LLM_STRACE:
             c_in_str = 'yes' if c_in else 'no'
             print(f"{stratum:<5}{c_in_str:<10}{threshold:<25.3e}{rel_size:<15.0%}{raw_size:<15.2e}{tv:<15.2e}{nu:<15}{top5_nucleus_str:<25}")
 
-
-    def compute_stratum_reconstruction_error(self, do_random=False, do_inverse=False):
-        # foward pass without masking (but we use our forward with graph to take into account the appoximation errors it could induce)
-        output = self.llm_hooked.forward_with_graph(self.input_tuple, self.graph, inverse=False, keep_residual=False, output_logit=True)  
-        full_logits = output[4]
-        # full_logits = self.original_logits
+    def compute_stratum_reconstruction_error(self, do_random=False, do_inverse=False, save_logit=False):
         for i, stratum_index in tqdm(enumerate(self.strata_index), desc=f"[STRACE] Evaluating strata"):
             for random in [False, True]:
                 if not do_random and random: # skip random
@@ -676,57 +961,57 @@ class LLM_STRACE:
                     # 2. Create the subgraph view
                     stratum = nx.subgraph_view(self.graph, filter_edge=filter_edges)
 
+                # check that the stratum size is indeed correct
+                stratum_size = stratum.get_size()
+                if not self.strata_raw_size[i] == stratum_size:
+                    raise MaskingError(f"Stratum {stratum_index} size mismatch: expected {self.strata_raw_size[i]}, got {stratum_size}")
+
                 for inverse in [True, False]:
                     if not do_inverse and inverse: # skip inverse
                         continue
-                    keep_residual = True if (inverse or random) else False # In case of inverse pruning, we keep the residual
-                    unique_stratum_index = list(set(nx.get_edge_attributes(self.graph, 'stratum').values()))
-                    output = self.llm_hooked.forward_with_graph(self.input_tuple, stratum, inverse=inverse, keep_residual=keep_residual, output_logit=True)  
-                    loss, entropy, predicted_token_id, rank, graph_logits, nb_non_masked_edges, total_nb_edges = output
-                    tv_original_graph = get_total_variation(full_logits, graph_logits)
-                    shared_nucleus, shared_nucleus_size = get_intersection_nucleus(full_logits,graph_logits)
-                    nucleus_indices = get_nucleus(graph_logits[0, -1].cpu(), 60)
+
+                    graph_mask, nb_non_masked_edges, _ = prepare_mask(
+                        graph=stratum, 
+                        seq_len=self.graph.graph['n_tokens'],
+                        nb_head=self.graph.graph['n_heads'], 
+                        n_layers=self.graph.graph['n_layers'], 
+                        inverse=inverse, 
+                        keep_residual=True if (inverse or random) else False) # In case of inverse pruning, we keep the residual)
+
+                    # check that the stratum size is indeed correct
+                    if not inverse and not random:
+                        if not self.strata_raw_size[i] == nb_non_masked_edges:
+                            raise MaskingError(f"Mask {stratum_index} size mismatch: expected {self.strata_raw_size[i]}, got {nb_non_masked_edges}")
+                        
+                    device = 'cuda'
+
+                    with torch.no_grad():
+                        output = self.llm(
+                            input_ids=self.input_prepared[0].to(device),
+                            attention_mask=self.input_prepared[1].to(device), 
+                            # labels=self.input_prepared[2].to(device),
+                            graph_mask=graph_mask, build_graph=None, unit_test=False, attn_implementation="eager")
+                    graph_logits = output.logits.view(-1, self.llm.config.vocab_size).cpu()
+                    loss, entropy, predicted_token_id, rank = surprisal(graph_logits, self.input_prepared[2])
+                    
+                    tv_original_graph = get_total_variation(self.original_logits, graph_logits.unsqueeze(0))
+                    shared_nucleus, shared_nucleus_size = get_intersection_nucleus(self.original_logits,graph_logits.unsqueeze(0))
+                    # print(f"\n[stratum {stratum_index}] shared_nucleus [{shared_nucleus_size}]", shared_nucleus)
+                    
+                    nucleus_indices = get_nucleus(graph_logits[-1].cpu(), 60)
+                    # print("Graph nucleus@60", [self.tokenizer.decode(token_id) for token_id in nucleus_indices[:5]])
+                    # print("Original nucleus@60", [self.tokenizer.decode(token_id) for token_id in get_nucleus(self.original_logits[0,-1].cpu(), 60)[:5]])
 
                     key_tuple = ('random' if random else 'trace', 'inverse' if inverse else 'only') 
                     self.strata_reco_tv[key_tuple[0]][key_tuple[1]].append(tv_original_graph)
                     self.strata_reco_nu[key_tuple[0]][key_tuple[1]].append(shared_nucleus)
-                    self.strata_nucleus_60[key_tuple[0]][key_tuple[1]].append([self.llm_hooked.tokenizer.decode(token_id) for token_id in nucleus_indices[:5]])
+                    self.strata_size_nu[key_tuple[0]][key_tuple[1]].append(shared_nucleus_size)
+                    self.strata_nucleus_60[key_tuple[0]][key_tuple[1]].append([self.tokenizer.decode(token_id) for token_id in nucleus_indices[:5]])
+                    self.strata_nucleus_60_tkn[key_tuple[0]][key_tuple[1]].append([token_id for token_id in nucleus_indices[:5]])
                     self.strata_loss[key_tuple[0]][key_tuple[1]].append(loss)
                     self.strata_entropy[key_tuple[0]][key_tuple[1]].append(entropy)
-
-    # def save(self, file_path: str):
-    #     """
-    #     Saves a specific subset of the LLM_STRACE attributes to a file
-    #     as a dictionary.
-    #     """
-    #     graph_data_dict = self.graph.pre_save()
-    #     # Create the dictionary with only the attributes we want
-    #     data_to_save = {
-    #         'graph': graph_data_dict,
-    #         'strata_rel_size': self.strata_rel_size,
-    #         'strata_raw_size': self.strata_raw_size,
-    #         'strata_reco_tv': self.strata_reco_tv,
-    #         'strata_reco_nu': self.strata_reco_nu,
-    #         'strata_tau': self.strata_tau,
-    #         'strata_index': self.strata_index,
-    #         'strata_connected_to_input': self.strata_connected_to_input,
-    #         'strata_loss': self.strata_loss,
-    #         'strata_entropy': self.strata_entropy,
-    #         'input_tuple': self.input_tuple,
-    #         'nb_strata': self.nb_strata,
-    #         'nucleus_60': self.strata_nucleus_60,
-    #         'nb_tokens': self.graph.graph['n_tokens'],
-    #         # Note: self.original_logits is NOT saved
-    #         # Note: self.llm_hooked is NOT saved
-    #     }
-        
-    #     # Save the dictionary using pickle
-    #     try:
-    #         with open(file_path, 'wb') as f:
-    #             pickle.dump(data_to_save, f)
-    #         print(f"[LLM_STRACE] Successfully saved to {file_path}")
-    #     except Exception as e:
-    #         print(f"[LLM_STRACE] Error saving file: {e}")
+                    if save_logit:
+                        self.strata_logits[key_tuple[0]][key_tuple[1]].append(graph_logits[-1].detach().cpu())
 
 
     def save_light(self, file_path: str):
@@ -737,14 +1022,9 @@ class LLM_STRACE:
         
         # --- 1. Serialize the Graph efficiently ---
         graph = self.graph
-        if isinstance(self.input_tuple[0], str):
-            input = self.input_tuple[0]
-        elif hasattr(self.input_tuple[0], 'input_ids'):
-            input = np.array(self.input_tuple[0].input_ids, dtype=np.uint32)
-        else:
-            raise ValueError(f"[LLM TRACE SAVE] Input in wrong format: {self.input_tuple[0]}")
-        next_token = self.input_tuple[1]
         
+        input = np.array(self.input_prepared[0].cpu(), dtype=np.uint32)
+        next_token = np.array(self.input_prepared[2][0,-1].cpu(), dtype=np.uint32)
 
         # Create a mapping for edge names (e.g., 'mlp' -> 0, 'attn_h1t2' -> 1)
         # This is the single biggest space saver.
@@ -769,14 +1049,6 @@ class LLM_STRACE:
             edge_stratum_array[i] = data.get('stratum', -1)
             i += 1
             
-        # if isinstance(self.input_tuple[0], str):
-        #     input_tuple_save = self.input_tuple
-        # elif hasattr(self.input_tuple[0], 'input_ids'):
-        #     input_tuple_save = (
-        #         np.array(self.input_tuple[0].input_ids, dtype=np.uint32),
-        #         self.input_tuple[1]
-        #     )
-
         # --- 2. Create the dictionary of all data to save ---
         # We save graph attributes (like n_tokens) as a single dict
         graph_attrs = dict(graph.graph)
@@ -797,6 +1069,7 @@ class LLM_STRACE:
             'strata_raw_size': np.array(self.strata_raw_size, dtype=np.uint32),
             'strata_reco_tv': self.strata_reco_tv,
             'strata_reco_nu': self.strata_reco_nu,
+            'strata_size_nu': self.strata_size_nu,
             'strata_tau': np.array(self.strata_tau, dtype=np.float32),
             'strata_index': np.array(self.strata_index, dtype=np.uint16),
             'strata_connected_to_input': self.strata_connected_to_input,
@@ -806,6 +1079,9 @@ class LLM_STRACE:
             'next_token': next_token,
             'nb_strata': self.nb_strata,
             'nucleus_60': self.strata_nucleus_60,
+            'nucleus_60_tkn': self.strata_nucleus_60_tkn,
+            'strata_logits': self.strata_logits,
+            'original_logits': self.original_logits.cpu(),
         }
         
         # --- 3. Save as a compressed .npz file ---
@@ -818,57 +1094,10 @@ class LLM_STRACE:
         except Exception as e:
             print(f"[LLM_STRACE] Error saving file: {e}")
 
-# def load_from_file(file_path: str, llm_hooked: LLM_Hooked, track_time: bool = False):
-#     """
-#     Loads the saved strace data from a pickle file and reconstructs
-#     the LLM_STRACE object.
-    
-#     Requires an active llm_hooked object to be passed in / or none if not used.
-#     """
-#     if not os.path.exists(file_path):
-#         print(f"[LLM_STRACE] Error: File not found at {file_path}")
-#         return None
-
-#     try:
-#         with open(file_path, 'rb') as f:
-#             data_to_load = pickle.load(f)
-#     except Exception as e:
-#         print(f"[LLM_STRACE] Error loading pickle file: {e}")
-#         return None
-
-#     # Create a new instance using the saved input_tuple
-#     new_strace = LLM_STRACE(data_to_load['input_tuple'], llm_hooked, track_time=track_time)
-
-#     # Re-hydrate the graph
-#     try:
-#         graph_data_dict = data_to_load['graph']
-#         new_strace.graph = load_from_dict(graph_data_dict, llm_hooked)
-#     except Exception as e:
-#         print(f"[LLM_STRACE] Error re-hydrating graph: {e}")
-#         return None
-
-#     # Re-populate other attributes, using .get() for safety
-#     new_strace.strata_rel_size = data_to_load.get('strata_rel_size')
-#     new_strace.strata_raw_size = data_to_load.get('strata_raw_size')
-#     new_strace.strata_reco_tv = data_to_load.get('strata_reco_tv')
-#     new_strace.strata_reco_nu = data_to_load.get('strata_reco_nu')
-#     new_strace.strata_tau = data_to_load.get('strata_tau')
-#     new_strace.strata_index = data_to_load.get('strata_index')
-#     new_strace.strata_connected_to_input = data_to_load.get('strata_connected_to_input')
-#     new_strace.strata_loss = data_to_load.get('strata_loss')
-#     new_strace.strata_entropy = data_to_load.get('strata_entropy')
-#     new_strace.nb_strata = data_to_load.get('nb_strata')
-#     new_strace.strata_nucleus_60 = data_to_load.get('nucleus_60')
-#     # Note: 'nb_tokens' is in graph.graph['n_tokens'] and will be
-#     # loaded as part of the graph re-hydration.
-
-#     print(f"[LLM_STRACE] Successfully loaded from {file_path}")
-#     return new_strace    
-
-def load_from_file_light(file_path: str, llm_hooked: LLM_Hooked):
+def load_from_file_light(file_path: str, llm: PreTrainedModel = None, tokenizer = None):
     """
     Loads an LLM_STRACE object from a .npz file and re-attaches
-    the llm_hooked object.
+    the llm.
     """
     
     # Ensure the file path ends with .npz if the save method adds it
@@ -891,42 +1120,17 @@ def load_from_file_light(file_path: str, llm_hooked: LLM_Hooked):
         # allow_pickle=True is required to load dicts and non-array objects
         data = np.load(file_path, allow_pickle=True)
         # print("Keys found in the npz file:", list(data.keys()))
-        raw_input = data['input']
 
-        # 1. Handle 0-d array (scalar) which usually holds the string
-        if isinstance(raw_input, np.ndarray) and raw_input.ndim == 0:
-            # .item() converts the 0-d array back to a Python scalar (str)
-            decoded_input = raw_input.item()
-            input_tuple = (decoded_input, data['next_token'].item())
+        input_ids = torch.tensor(data['input']).long()
+        attention_mask = torch.ones_like(input_ids)
+        labels = torch.full_like(input_ids, -100)
+        labels[0, -1] = data['next_token'].item()
+        input_prepared = (input_ids, attention_mask, labels)
 
-        # 2. Handle actual arrays of strings (dtype kind 'U' or 'S')
-        elif isinstance(raw_input, np.ndarray) and raw_input.dtype.kind in ('U', 'S'):
-            # If it was saved as a 1D array of strings, use .item() if it has only 1 element
-            if raw_input.size == 1:
-                input_tuple = (raw_input.item(), data['next_token'].item())
-            else:
-                # Handle list of strings if necessary, or error out
-                raise ValueError("Input is a multi-element string array.")
-
-        # 3. Handle numeric arrays (Token IDs)
-        elif isinstance(raw_input, np.ndarray) and raw_input.dtype.kind in ('u', 'i'):
-            input_ids = torch.tensor(raw_input)
-            # Assuming MockTokenized is defined elsewhere
-            mock_tokenized = MockTokenized(input_ids, torch.zeros_like(input_ids))
-            input_tuple = (mock_tokenized, data['next_token'].item())
-
-        # 4. Handle plain Python strings (rare in npz but possible depending on save method)
-        elif isinstance(raw_input, str):
-            input_tuple = (raw_input, data['next_token'].item())
-
-        else:
-            raise ValueError(f"[LLM TRACE LOAD] Input in wrong format: {type(raw_input)}")
         # --- 1. Reconstruct the graph ---
         
         # Start with an empty graph and set attributes
-        llm_graph = LLM_Graph_NX(
-            llm_hooked, 
-            input_sentence=input_tuple[0])
+        llm_graph = LLM_Graph_NX()
         
         llm_graph.clear()
         llm_graph.graph = data['graph_attrs'].item() # .item() extracts the dict
@@ -954,9 +1158,9 @@ def load_from_file_light(file_path: str, llm_hooked: LLM_Hooked):
         llm_graph.add_edges_from(edge_data)
 
         # --- 2. Reconstruct the LLM_STRACE object ---
-        
+
         # Create a dummy object first (won't be used, but needed for cls)
-        strace = LLM_STRACE(input_tuple, llm_hooked)
+        strace = LLM_STRACE(llm=llm, tokenizer=tokenizer)
         
         # Overwrite the empty graph with our loaded one
         strace.graph = llm_graph
@@ -966,14 +1170,19 @@ def load_from_file_light(file_path: str, llm_hooked: LLM_Hooked):
         strace.strata_raw_size = list(data['strata_raw_size'])
         strace.strata_reco_tv = data['strata_reco_tv'].item()
         strace.strata_reco_nu = data['strata_reco_nu'].item()
+        if 'strata_size_nu' in data:
+            strace.strata_size_nu = data['strata_size_nu'].item()
         strace.strata_tau = list(data['strata_tau'])
         strace.strata_index = list(data['strata_index'])
         strace.strata_connected_to_input = list(data['strata_connected_to_input'])
         strace.strata_loss = data['strata_loss'].item()
         strace.strata_entropy = data['strata_entropy'].item()
-        strace.input_tuple = input_tuple
+        strace.input_prepared = input_prepared
         strace.nb_strata = data['nb_strata'].item()
         strace.strata_nucleus_60 = data['nucleus_60'].item()
+        if 'strata_logits' in data:
+            strace.strata_logits = data['strata_logits'].item()
+        strace.original_logits = torch.tensor(data['original_logits'])
         
         return strace
 

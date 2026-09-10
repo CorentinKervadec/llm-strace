@@ -3,75 +3,84 @@
 #-----------------------------------------------------------------------
 # Master SLURM Job Submission Script
 #
-# Usage: ./submit_jobs.sh <gpu_partition> <model_name> <sentence_length> <nb_data> <chunk_size> [start_stage] [end_stage]
+# Usage: ./submit_jobs.sh <partition> <model_name> <importance> <strace> <dataset_name> <split> <nb_data> <chunk_size> [start_stage] [end_stage]
 #
 # Arguments:
-#   partition:       (Required) e.g., "alien" or "medium"
-#   model_name:      (Required) e.g., "allenai/OLMo-2-0425-1B"
-#   importance:      (Required) e.g., "norm"
-#   strace:          (Required) e.g., "threshold"
-#   model_name:      (Required) e.g., "allenai/OLMo-2-0425-1B"
-#   sentence_length: (Required) e.g., 30
-#   nb_data:         (Required) e.g., 10000
-#   chunk_size:      (Required) e.g., 50
-#   start_stage:     (Optional) Stage to start from (1-4). Default: 1
-#   end_stage:       (Optional) Stage to end on (1-4). Default: 4
+#   1. partition:    (Required) e.g., "alien"
+#   2. model_name:   (Required) e.g., "allenai/OLMo-2-0425-1B"
+#   3. importance:   (Required) e.g., "norm"
+#   4. strace:       (Required) e.g., "threshold"
+#   5. dataset_name: (Required) e.g., "c4" or "wikitext"
+#   6. split:        (Required) e.g., "0" or "none" (use "none" or "" if no split)
+#   7. nb_data:      (Required) e.g., 10000
+#   8. chunk_size:   (Required) e.g., 50
+#   9. start_stage:  (Optional) Default: 1
+#   10. end_stage:   (Optional) Default: 4
 #
-# Example (Run all stages):
-#   ./submit_jobs.sh norm threshold 30 10000 50 "allenai/OLMo-2-0425-1B"
-#
-# Example (Run only Stage 2 and 3):
-#   ./submit_jobs.sh norm threshold 30 10000 50 "allenai/OLMo-2-0425-1B" 2 3
+# Example:
+#   ./submit_jobs.sh alien "allenai/OLMo-2-0425-1B" norm threshold c4 0 10000 50
 #-----------------------------------------------------------------------
 
 set -e # Exit immediately if any command fails
 
 # --- 1. Input Validation ---
-if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ] || [ -z "$5" ] || [ -z "$6" ] || [ -z "$7" ]; then
+if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ] || [ -z "$5" ] || [ -z "$7" ] || [ -z "$8" ] || [ -z "$9" ] || [ -z "$10" ]; then
     echo "Error: Missing required arguments."
-    echo "Usage: $0 <gpu_partition> <model_name> <importance> <threshold> <sentence_length> <nb_data> <chunk_size> [start_stage] [end_stage]"
+    echo "Usage: $0 <partition> <CPU_OFFLOAD> <model_name> <checkpoint> <importance> <strace> <dataset_name> <split> <nb_data> <chunk_size> [start_stage] [end_stage]"
     exit 1
 fi
 
 PARTITION=$1
-MODEL_NAME=$2
-IMPORTANCE=$3
-STRACE=$4
-SENTENCE_LENGTH=$5
-NB_DATA=$6
-CHUNK_SIZE=$7
-START_STAGE=${8:-1}  # Default to 1 if not provided
-END_STAGE=${9:-4}    # Default to 4 if not provided
+CPU_OFFLOAD=$2
+MODEL_NAME=$3
+CHECKPOINT=$4
+IMPORTANCE=$5
+STRACE=$6
+DATASET_NAME=$7
+SPLIT=$8
+NB_DATA=$9
+CHUNK_SIZE=${10}
+START_STAGE=${11:-1}
+END_STAGE=${12:-4}
 
-
-MAX_CONCURRENT_JOBS=50 # Fairness: Don't run more than 50 jobs at once
+MAX_CONCURRENT_JOBS=50
 EXCLUDED_NODES="node044,node042"
-# EXCLUDED_NODES="node033,node034,node035,node036,node037,node038,node039,node040,node042,node043,node044" # only use node041
+
+# Handle Split Logic for Folders
+if [ "$SPLIT" == "none" ] || [ -z "$SPLIT" ]; then
+    SPLIT_SUFFIX=""
+    SPLIT_VAL=""
+    # echo "No Split specified."
+else
+    SPLIT_SUFFIX="_${SPLIT}"
+    SPLIT_VAL=$SPLIT
+    # echo "Split detected: $SPLIT"
+fi
 
 echo "--- Configuration ---"
-echo "GPU Partition: $PARTITION"
-echo "Model Name: $MODEL_NAME"
-echo "Importance: $IMPORTANCE"
-echo "Strace: $STRACE"
-echo "Sentence Length: $SENTENCE_LENGTH"
-echo "NB Data: $NB_DATA"
-echo "Chunk Size: $CHUNK_SIZE"
-echo "Start Stage: $START_STAGE"
-echo "End Stage: $END_STAGE"
+echo "GPU Partition:   $PARTITION"
+echo "Model Name:      $MODEL_NAME"
+echo "Checkpoint:      $CHECKPOINT"
+echo "Importance:      $IMPORTANCE"
+echo "Strace:          $STRACE"
+echo "Dataset Name:    $DATASET_NAME"
+echo "Split:           $SPLIT"
+echo "NB Data:         $NB_DATA"
+echo "Chunk Size:      $CHUNK_SIZE"
+echo "Start Stage:     $START_STAGE"
+echo "End Stage:       $END_STAGE"
 echo "---------------------"
 
 PARTITION_FLAGS="--partition=$PARTITION --qos=alien"
-# if [ "$PARTITION" = "alien" ]; then
-#     PARTITION_FLAGS="--partition=alien --qos=alien"
-# fi
 
 # --- 2. Configuration & File/Directory Setup ---
 
-# Sanitize the model name: get the last part after the final '/'
 SANITIZED_MODEL_NAME=${MODEL_NAME##*/}
 echo "Sanitized Model Name: $SANITIZED_MODEL_NAME"
 
-DATASET_FILE="$(pwd)/data/${SENTENCE_LENGTH}_data.txt"
+DATASET_FILE="$(pwd)/data/${DATASET_NAME}_${SPLIT_VAL}.txt"
+
+echo "Dataset File: $DATASET_FILE"
 
 # First, get the line count (SAFELY)
 if [ -f "$DATASET_FILE" ]; then
@@ -87,14 +96,11 @@ else
   TOTAL_SENTENCES=$NB_DATA
 fi
 
-# --- Handle 0 sentences case ---
 if [ "$TOTAL_SENTENCES" -eq 0 ]; then
     echo "Error: TOTAL_SENTENCES is 0. No data to process."
     exit 1
 fi
 
-# Calculate total number of chunks (jobs)
-# Use integer arithmetic: (A + B - 1) / B
 NUM_CHUNKS=$(((TOTAL_SENTENCES + CHUNK_SIZE - 1) / CHUNK_SIZE))
 ARRAY_RANGE="0-$((NUM_CHUNKS - 1))%${MAX_CONCURRENT_JOBS}"
 
@@ -104,22 +110,38 @@ echo "Slurm Array Range: $ARRAY_RANGE"
 
 # --- Directory and Data Configuration ---
 export MODEL_NAME=$MODEL_NAME
+export CHECKPOINT=$CHECKPOINT
 export IMPORTANCE=$IMPORTANCE
 export STRACE=$STRACE
 export DATA_FILE=$DATASET_FILE
 export CHUNK_SIZE=$CHUNK_SIZE
 export TOTAL_SENTENCES=$TOTAL_SENTENCES
+# Exporting specific variables for python scripts
+export DATASET_NAME=$DATASET_NAME 
+export SPLIT=$SPLIT_VAL
+# CPU OFFLOAD to save GPU memory
+export CPU_OFFLOAD=$CPU_OFFLOAD
 
 # Define all directory paths
-# Define all directory paths with SANITIZED_MODEL_NAME
-BASE_OUTPUT_DIR="$(pwd)/results_${IMPORTANCE}_${STRACE}_new/${SANITIZED_MODEL_NAME}"
-export INTERMEDIATE_DIR="${BASE_OUTPUT_DIR}/intermediate_graphs_${SENTENCE_LENGTH}"
-export STRACE_DIR="${BASE_OUTPUT_DIR}/intermediate_straces_${SENTENCE_LENGTH}"
-# export STRACE_DIR="${BASE_OUTPUT_DIR}/final_straces_${SENTENCE_LENGTH}"
-export FINAL_DIR="${BASE_OUTPUT_DIR}/final_straces_${SENTENCE_LENGTH}"
-# export FINAL_DIR="${BASE_OUTPUT_DIR}/final_before_softmax_straces_${SENTENCE_LENGTH}"
-export PDF_FILE="${BASE_OUTPUT_DIR}/strace_analysis_plots_${SENTENCE_LENGTH}.pdf"
-LOG_DIR="${BASE_OUTPUT_DIR}/slurm_logs_${SENTENCE_LENGTH}"
+# Base directory uses just the DATASET_NAME
+BASE_OUTPUT_DIR="$(pwd)/results_${IMPORTANCE}_${STRACE}_${DATASET_NAME}_emnlp/${SANITIZED_MODEL_NAME}"
+
+# Subdirectories use the SPLIT_SUFFIX (e.g., _S0 or empty)
+# Note: I removed ${SENTENCE_LENGTH} from these paths as requested
+export INTERMEDIATE_DIR="${BASE_OUTPUT_DIR}/${CHECKPOINT}/intermediate_graphs${SPLIT_SUFFIX}"
+# export INTERMEDIATE_DIR="${BASE_OUTPUT_DIR}/final_straces${SPLIT_SUFFIX}" # we reuse the graph already computed
+export STRACE_DIR="${BASE_OUTPUT_DIR}/${CHECKPOINT}/intermediate_straces${SPLIT_SUFFIX}"
+# export STRACE_DIR="${BASE_OUTPUT_DIR}/final_straces${SPLIT_SUFFIX}"
+# export STRACE_DIR="${BASE_OUTPUT_DIR}/final_straces${SPLIT_SUFFIX}"
+export FINAL_DIR="${BASE_OUTPUT_DIR}/${CHECKPOINT}/final_straces${SPLIT_SUFFIX}"
+# export FINAL_DIR="${BASE_OUTPUT_DIR}/final_straces${SPLIT_SUFFIX}_size"
+export PDF_FILE="${BASE_OUTPUT_DIR}/${CHECKPOINT}/strace_analysis_plots${SPLIT_SUFFIX}.pdf"
+LOG_DIR="${BASE_OUTPUT_DIR}/slurm_logs${SPLIT_SUFFIX}"
+
+echo "Base Output Dir: $BASE_OUTPUT_DIR"
+echo "Intermediate Dir: $INTERMEDIATE_DIR"
+echo "Strace Dir: $STRACE_DIR"
+echo "Final Dir: $FINAL_DIR"
 
 # Create all directories
 mkdir -p $INTERMEDIATE_DIR
@@ -129,8 +151,6 @@ mkdir -p $LOG_DIR
 
 # --- 3. Validation Function ---
 
-# Function to check if the prerequisite files exist for a given stage
-# Usage: check_files <directory_to_check> <expected_file_count> <stage_name>
 check_files() {
     local dir=$1
     local expected_count=$2
@@ -139,18 +159,14 @@ check_files() {
     echo "Validating prerequisite for $stage_name..."
     if [ ! -d "$dir" ]; then
         echo "Error: Prerequisite directory $dir does not exist."
-        echo "Cannot skip to $stage_name. Please run previous stages."
         exit 1
     fi
 
-    # Count files (e.g., .npz)
-    # This counts one file *per sentence*
     local file_count=$(find "$dir" -maxdepth 1 -type f -name '*.npz' | wc -l)
     
     if [ "$file_count" -lt "$expected_count" ]; then
         echo "Error: Prerequisite check failed for $stage_name."
-        echo "  Found $file_count files in $dir, but expected $expected_count (one per sentence)."
-        echo "  Cannot skip to $stage_name. Please re-run previous stages."
+        echo "  Found $file_count files in $dir, but expected $expected_count."
         read -p "Do you want to continue anyway? (y/n) " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -163,12 +179,11 @@ check_files() {
 
 # --- 4. Job Submission ---
 
-LAST_JOB_ID="" # This will hold the ID of the *previous* stage
+LAST_JOB_ID=""
 
 # --- Stage 1: GPU Population ---
 if [ "$START_STAGE" -le 1 ] && [ "$END_STAGE" -ge 1 ]; then
     echo "Submitting Stage 1: GPU Population..."
-    # Set partition and QoS flags based on partition type
 
     GPU_JOB_ID=$(sbatch --parsable \
         --array=$ARRAY_RANGE \
@@ -191,15 +206,11 @@ fi
 if [ "$START_STAGE" -le 2 ] && [ "$END_STAGE" -ge 2 ]; then
     echo "Submitting Stage 2: CPU Analysis..."
     
-    # Set dependency if Stage 1 was just submitted
     DEP_FLAG=""
     if [ ! -z "$LAST_JOB_ID" ]; then
-        # Use aftercorr for efficient array-to-array dependency
-        # stage_2_job[i] will run just after stage_1_job[i]
         DEP_FLAG="--dependency=aftercorr:${LAST_JOB_ID}"
         echo "  -> Will run after corresponding Stage 1 jobs."
     elif [ "$START_STAGE" -eq 2 ]; then
-        # If we are *starting* here, validate previous stage
         check_files $INTERMEDIATE_DIR $TOTAL_SENTENCES "Stage 2"
     fi
 
@@ -230,6 +241,7 @@ if [ "$START_STAGE" -le 3 ] && [ "$END_STAGE" -ge 3 ]; then
         echo "  -> Will run after corresponding Stage 2 jobs."
     elif [ "$START_STAGE" -eq 3 ]; then
         check_files $STRACE_DIR $TOTAL_SENTENCES "Stage 3"
+        # echo "Skipping check file..."
     fi
 
     GPU_JOB_ID_2=$(sbatch --parsable \
@@ -256,14 +268,12 @@ if [ "$START_STAGE" -le 4 ] && [ "$END_STAGE" -ge 4 ]; then
 
     DEP_FLAG=""
     if [ ! -z "$LAST_JOB_ID" ]; then
-        # Use afterany: run plot *after all* stage 3 jobs are finished
         DEP_FLAG="--dependency=afterany:${LAST_JOB_ID}"
         echo "  -> Will run after all Stage 3 jobs have finished."
     elif [ "$START_STAGE" -eq 4 ]; then
         check_files $FINAL_DIR $TOTAL_SENTENCES "Stage 4 (Plotting)"
     fi
     
-    # This is a single job, not an array
     PLOT_JOB_ID=$(sbatch --parsable \
         $DEP_FLAG \
         --export=ALL,FINAL_DIR,PDF_FILE \
@@ -284,4 +294,3 @@ echo ""
 echo "All requested jobs submitted successfully."
 echo "Check '$LOG_DIR' for logs."
 echo "Run 'squeue -u $USER' to monitor."
-

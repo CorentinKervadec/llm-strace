@@ -1,12 +1,17 @@
 import argparse
 import os
 import time
-from src.llm_trace.llm_trace import LLM_STRACE
-from src.llm_hooked.hook_constructors import get_hooked_constructor
+from src.llm_trace.llm_trace_2 import LLM_STRACE
+from src.modified_transformers.utils import get_model_class, identify_model_type
 import re
+import torch
+from transformers import AutoTokenizer
+from accelerate import cpu_offload
+import csv
+from itertools import islice
 
 def load_sentence(data_file, index):
-    if 'wikitext' in data_file:
+    if 'wikitext' in data_file or 'df' in data_file:
         return load_sentence_wikitext(data_file, index)
     else:
         return load_sentence_else(data_file, index)
@@ -50,26 +55,44 @@ def main():
     parser.add_argument('--data_file', type=str, required=True, help='Path to the sentences.jsonl file.')
     parser.add_argument('--intermediate_dir', type=str, required=True, help='Directory to save intermediate graphs.')
     parser.add_argument('--importance', type=str, required=True, help='Importance mode')
+    parser.add_argument('--cpu_offload', action='store_true', help='Enable CPU offload')
+    parser.add_argument('--checkpoint', type=str, default='main')
     args = parser.parse_args()
 
     # --- Parameters ---
     half_precision = True
     untrained = False
     importance_mode = args.importance
-
-    match = re.search(r'(\d+)B', args.model_name)
-    model_size = int(match.group(1)) if match else None
-    if model_size > 10:
-        batch_size = 1
-    else:
-        batch_size = 8
+    batch_size = 1 # not used anymore
 
     # --- Initialise Model (on GPU) - ONCE per job ---
     print(f"[GPU-JOB CHUNK {args.chunk_id}] Loading model...")
     start_time = time.time()
-    HOOKED_CONSTRUCT = get_hooked_constructor(args.model_name)
-    llm_hooked = HOOKED_CONSTRUCT(args.model_name, half_precision, untrained)
-    print(f"[GPU-JOB CHUNK {args.chunk_id}] Time to initialise Mistral_Hooked: {time.time() - start_time:.2f} s")
+    half_precision = True
+    model_type = identify_model_type(args.model_name)
+    hf_constructor = get_model_class(model_type)
+    if args.cpu_offload:
+        llm = hf_constructor.from_pretrained(
+            args.model_name,
+            attn_implementation="eager",
+            use_safetensors=True,
+            torch_dtype=torch.float16 if half_precision else torch.float32,
+            revision=args.checkpoint
+        )
+        llm = cpu_offload(llm, execution_device="cuda:0")
+    else:
+        llm = hf_constructor.from_pretrained(
+            args.model_name,
+            device_map="auto",
+            attn_implementation="eager",
+            use_safetensors=True,
+            torch_dtype=torch.float16 if half_precision else torch.float32,
+            revision=args.checkpoint
+        )
+
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+    device = llm.device
+    print(f"[GPU-JOB CHUNK {args.chunk_id}] Time to initialise {args.model_name}: {time.time() - start_time:.2f} s")
 
     # --- Calculate sentence range for this job ---
     start_index = args.chunk_id * args.chunk_size
@@ -96,25 +119,21 @@ def main():
         
         print(f"[GPU-JOB {sentence_index}] Processing sentence: '{input_sentence}'")
 
-        # --- Register Hooks (if needed) ---
-        if not llm_hooked.extraction_hook_registred():
-            llm_hooked.register_extraction_hooks()
-
         # --- Run GPU-bound Trace ---
         
         # 1. Initialise the strace
         start_time = time.time()
-        strace = LLM_STRACE((input_sentence, gt_next), llm_hooked, track_time=True)
+        strace = LLM_STRACE(
+            sentence=input_sentence,
+            next_word=gt_next, 
+            llm=llm, 
+            tokenizer=tokenizer,
+            track_time=False)
         print(f"[GPU-JOB {sentence_index}] Time to initialise LLM_STRACE: {time.time() - start_time:.2f} s")
-
-        # 2. Initialise the llm graph
-        start_time = time.time()
-        strace.initialize_graph(importance_mode)
-        print(f"[GPU-JOB {sentence_index}] Time to initialise Mistral_Graph_NX: {time.time() - start_time:.2f} s")
         
-        # 3. Populate the graph
+        # 2. Populate the graph
         start_time = time.time()
-        strace.populate_graph(batch_size)
+        strace.populate_graph(batch_size, importance_mode)
         print(f"[GPU-JOB {sentence_index}] Time to populate graph: {time.time() - start_time:.2f} s")
 
         # --- Save Intermediate State ---

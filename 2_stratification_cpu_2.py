@@ -1,7 +1,7 @@
 import argparse
 import os
 import time
-from src.llm_trace.llm_trace import load_from_file_light, THRESHOLD_STRACE
+from src.llm_trace.llm_trace_2 import load_from_file_light, THRESHOLD_STRACE
 
 def main():
     parser = argparse.ArgumentParser(description="Stage 2: CPU Stratum Analysis")
@@ -19,7 +19,16 @@ def main():
     strace_mode = args.strace # 'nucleus' or 'threshold'
     importance_mode = args.importance
     
-    threshold_values = THRESHOLD_STRACE['_'.join([importance_mode, strace_mode])]
+    if strace_mode == 'size':
+        threshold_values = [
+            1e-5, 2e-5, 4e-5, 8e-5,
+            1e-4, 2e-4, 4e-4, 8e-4,
+            1e-3, 1.2e-3, 1.4e-3, 2e-3, 3e-3, 4e-3, 6e-3, 8e-3,
+            1e-2, 2e-2, 4e-2, 6e-2, 8e-2,
+            1e-1, 2e-1, 4e-1, 6e-1, 8e-1
+        ]
+    else:
+        threshold_values = THRESHOLD_STRACE['_'.join([importance_mode, strace_mode])]
 
     # --- Calculate sentence range for this job ---
     start_index = args.chunk_id * args.chunk_size
@@ -36,7 +45,7 @@ def main():
 
         print(f"[CPU-JOB {sentence_index}] Loading intermediate file: {intermediate_file}")
         # strace = load_from_file(intermediate_file, None, False)
-        strace = load_from_file_light(intermediate_file, None)
+        strace = load_from_file_light(intermediate_file)
         strace.reset_strace()
         strace.freeze_strace(args.freeze)
         # --- Run CPU-bound Analysis ---

@@ -215,7 +215,7 @@ class Qwen_Hooked(LLM_Hooked):
         # in Qwen3, the mlp LN is applied at the input of the MLP
         hidden_states = module.post_attention_layernorm(hidden_states)
 
-        hidden_states = MLP_masked(module, hidden_states, graph_mlp_mask)
+        # hidden_states = MLP_masked(module, hidden_states, graph_mlp_mask)
 
         # Apply MLP residual mask if provided
         if mlp_residual_mask is not None:

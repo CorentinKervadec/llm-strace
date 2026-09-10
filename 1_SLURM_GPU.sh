@@ -32,17 +32,30 @@ source activate unnatural_prompt
 : "${CHUNK_SIZE:?CHUNK_SIZE not set}"
 : "${TOTAL_SENTENCES:?TOTAL_SENTENCES not set}"
 : "${MODEL_NAME:?MODEL_NAME not set}"
+: "${CHECKPOINT:?CHECKPOINT not set}"
 : "${IMPORTANCE:?IMPORTANCE not set}"
+: "${CPU_OFFLOAD:?CPU_OFFLOAD not set}"
+
+
+# Initialize the command in an array
+CMD_ARGS=(
+    --model_name "$MODEL_NAME"
+    --chunk_id "$SLURM_ARRAY_TASK_ID"
+    --chunk_size "$CHUNK_SIZE"
+    --total_sentences "$TOTAL_SENTENCES"
+    --data_file "$DATA_FILE"
+    --intermediate_dir "$INTERMEDIATE_DIR"
+    --importance "$IMPORTANCE"
+    --checkpoint "$CHECKPOINT"
+)
+
+# Conditionally add the flag
+if [ "$CPU_OFFLOAD" = "1" ]; then
+    CMD_ARGS+=(--cpu_offload)
+fi
 
 # Run the GPU-bound Python script
-python 1_extraction_gpu.py \
-    --model_name $MODEL_NAME \
-    --chunk_id $SLURM_ARRAY_TASK_ID \
-    --chunk_size $CHUNK_SIZE \
-    --total_sentences $TOTAL_SENTENCES \
-    --data_file $DATA_FILE \
-    --intermediate_dir $INTERMEDIATE_DIR \
-    --importance $IMPORTANCE
+python 1_extraction_gpu_2.py "${CMD_ARGS[@]}"
 
 echo "--- Finished GPU Job Chunk $SLURM_ARRAY_TASK_ID ---"
 date

@@ -391,7 +391,7 @@ def node_reconstruction_sanity_check(node, incoming_edges, half_precision):
 
 def sanity_check_before_mlp(before_attn, attn_out, after_mlp, mlp_out, half_precision):
     """
-    Sanity check to verify that (before_attn + attn_out) ≈ (after_mlp - mlp_out).
+    Sanity check to verify that (before_attn + attn_out + mlp_out) ≈ after_mlp.
 
     Args:
         before_attn (torch.Tensor): Tensor before attention.
@@ -403,8 +403,8 @@ def sanity_check_before_mlp(before_attn, attn_out, after_mlp, mlp_out, half_prec
         AssertionError: If the reconstruction difference exceeds the tolerance.
     """
 
-    left = before_attn.to(DEVICE) + attn_out.to(DEVICE)
-    right = after_mlp.to(DEVICE) - mlp_out.to(DEVICE)
+    left = before_attn.to(DEVICE) + attn_out.to(DEVICE) + mlp_out.to(DEVICE)
+    right = after_mlp.to(DEVICE)
 
     if not torch.allclose(left, right, atol=get_reconstruction_tolerance(half_precision)):
         diff = (left - right).abs()
@@ -414,8 +414,8 @@ def sanity_check_before_mlp(before_attn, attn_out, after_mlp, mlp_out, half_prec
             "[SANITY CHECK][BEFORE MLP] Reconstruction failed.\n"
             f"Max element-wise difference: {max_diff}\n"
             f"Sum of differences: {sum_diff}\n"
-            f"Left (before_attn + attn_out): {left}\n"
-            f"Right (after_mlp - mlp_out): {right}\n"
+            f"Left (before_attn + attn_out + mlp_out): {left}\n"
+            f"Right (after_mlp): {right}\n"
         )
         raise AssertionError(error_message)
     

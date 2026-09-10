@@ -3,6 +3,7 @@ import src.llm_hooked.sanity_checks as sanity_check
 import time
 import torch.nn.functional as F
 
+
 EPS = 1e-7
 
 def surprisal(logits, labels):
@@ -111,6 +112,15 @@ class LLM_Hooked():
     def get_final_norm(self):
         raise NotImplementedError("Subclasses should implement this method.")
     
+    def get_embed(self):
+        raise NotImplementedError("Subclasses should implement this method.")
+    
+    def get_rotary(self):
+        raise NotImplementedError("Subclasses should implement this method.")
+
+    def get_lm_head(self):
+        raise NotImplementedError("Subclasses should implement this method.")
+
     def get_attention_dense_layers(self):
         raise NotImplementedError("Subclasses should implement this method.")
 
@@ -269,7 +279,7 @@ class LLM_Hooked():
         self.caches['attention'], self.caches['mlp'], self.caches['residual'] = self.init_buffers()
         self.register_extraction_hooks()
 
-    def decompose_attention_with_batching(self, value, attn_weights, y_batch_size=5, x_batch_size=5):
+    def decompose_attention_with_batching(self, value, attn_weights, y_batch_size=5, x_batch_size=5, layer=None):
         """
         I think this operation should be universal across most LLMs, once value and attn_weights are in the
         correct format.
@@ -283,24 +293,36 @@ class LLM_Hooked():
             dense (list of nn.Linear): List of Dense layers for projecting attention outputs.
             y_batch_size (int): Batch size for the target sequence dimension (y).
             x_batch_size (int): Batch size for the source sequence dimension (x).
-            half_precision (bool): Whether to use half precision for computations.
-            cast_output_to_char (bool): Whether to cast the output to CPU for memory efficiency.
+            layer (int or None): Specify which layer is processed (None means all layers). 
 
         Returns:
             torch.Tensor: Decomposed attention outputs of shape [layer, seq_y, head, seq_x, hidden_dim].
         """
-        d_layer, d_head, d_seq_x, d_h_head = value.shape
-        _, _, d_seq_y, _ = attn_weights.shape
         value_device = value.device
 
-        # Reshape the dense layer weights for each layer
-        Wo = []
-        for layer_i in range(d_layer):
-            # Extract the weight
-            layer_weight = self.get_reshaped_attention_dense(layer_i, d_h_head, d_head)
-            Wo.append(layer_weight)
+        if layer is None: # all layers
+            d_layer, d_head, d_seq_x, d_h_head = value.shape
+            _, _, d_seq_y, _ = attn_weights.shape
 
-        Wo = torch.stack(Wo, dim=0)  # [layer, head, hidden_dim, head_dim]
+            # Reshape the dense layer weights for each layer
+            Wo = []
+            for layer_i in range(d_layer):
+                # Extract the weight
+                layer_weight = self.get_reshaped_attention_dense(layer_i, d_h_head, d_head)
+                Wo.append(layer_weight)
+
+            Wo = torch.stack(Wo, dim=0)  # [layer, head, hidden_dim, head_dim]
+        else: # one layer
+            d_head, d_seq_x, d_h_head = value.shape
+            _, d_seq_y, _ = attn_weights.shape
+
+            value = value.unsqueeze(0) # adding the layer dimension
+            attn_weights = attn_weights.unsqueeze(0)
+
+            # Extract the weight
+            layer_weight = self.get_reshaped_attention_dense(layer, d_h_head, d_head)
+            Wo = layer_weight.unsqueeze(0) # [layer, head, hidden_dim, head_dim]
+        
         Wo = Wo.to(value_device)
 
         if self.half_precision:
@@ -355,25 +377,25 @@ class LLM_Hooked():
             sanity_check.sanity_check_linearize_final_RMS(residual_stream[0, -1], residual_outputs[0, -1], linearized_norm, self.half_precision)
             true_norm =  self.get_final_norm()
             sanity_check.sanity_check_linearize_RMS(true_norm, residual_outputs[0, -1], linearized_norm, self.half_precision)
-            # print("[LLM Hooked] Sanity checks final ln passed!")
+            print("[LLM Hooked] Sanity checks final ln passed!")
             # Sanity checks for attention outputs
             for layer in range(self.get_n_layers()):
                 sanity_check.sanity_check_head_output(head_outputs[:,layer], outputs_attn[:,layer], self.half_precision, attn_bias=None)
-                # print(f"[LLM Hooked][L{layer}/{self.get_n_layers()-1}] Sanity checks head output passed!")
+                print(f"[LLM Hooked][L{layer}/{self.get_n_layers()-1}] Sanity checks head output passed!")
             # Validate MLP output reconstruction
             outputs_mlp = torch.stack(self.caches['mlp']['output'])  # [layers, batch, seq, hidden_dim]
             for layer in range(self.get_n_layers()): # this sanity check is stupid
                 sanity_check.sanity_check_mlp_output(mlp_outputs[0][layer], outputs_mlp[layer], self.half_precision, mlp_bias=None)
-                # print(f"[LLM Hooked][L{layer}/{self.get_n_layers()-1}] Sanity checks mlp output passed!")
+                print(f"[LLM Hooked][L{layer}/{self.get_n_layers()-1}] Sanity checks mlp output passed!")
             # Validate residual stream reconstruction
             residual_past = residual_stream[0, :-1]  # [layers, seq, hidden_dim]
             residual_current = residual_stream[0, 1:]  # [layers, seq, hidden_dim]
             for layer in range(self.get_n_layers()-1):# ignore last layer because it has final norm
                 for token in range(residual_stream.size(2)):
                     sanity_check.sanity_check_stream_output(residual_outputs[0, layer, token], residual_stream[0, layer+1, token], self.half_precision)
-                    # print(f"[LLM Hooked][L{layer}/{self.get_n_layers()-1}][T{token}/{residual_stream.size(2)-1}]  Sanity checks residual passed!")
+                    print(f"[LLM Hooked][L{layer}/{self.get_n_layers()-1}][T{token}/{residual_stream.size(2)-1}]  Sanity checks residual passed!")
             for layer in range(self.get_n_layers()):
-                # print(f"[LLM Hooked][L{layer}/{self.get_n_layers()-1}]")
+                print(f"[LLM Hooked][L{layer}/{self.get_n_layers()-1}]")
                 mlp_out = mlp_outputs[0][layer]
                 head_out = head_outputs[0, layer]
                 attn_out = outputs_attn[0, layer]
@@ -386,7 +408,7 @@ class LLM_Hooked():
                     sanity_check.sanity_check_linearize_RMS(true_norm, mlp_out, post_mlp_norm_linear, self.half_precision)
                     # apply normalisation to the mlp output
                     mlp_out = torch.einsum('sd,sd->sd', post_mlp_norm_linear, mlp_out.to(post_mlp_norm_linear.device)).cpu()
-                    # print("[LLM Hooked] Sanity checks post mlp ln passed!")
+                    print("[LLM Hooked] Sanity checks post mlp ln passed!")
                 if not post_attn_norms_linear[layer] is None:    
                     post_attn_norm_linear = post_attn_norms_linear[layer] # [seq, hidden_dim]
                     # check norm linearisation
@@ -396,7 +418,7 @@ class LLM_Hooked():
                     head_out = torch.einsum('sd,sihd->sihd', post_attn_norm_linear, head_out.to(post_attn_norm_linear.device)).cpu()
                     # attn_out = torch.einsum('sd,sd->sd', post_attn_norm_linear, attn_out.to(post_attn_norm_linear.device)).cpu()
                     # assert torch.allclose(head_out.sum(-2).sum(-2), attn_out, atol=0.01)                    
-                    # print("[LLM Hooked] Sanity checks post attn ln passed!")
+                    print("[LLM Hooked] Sanity checks post attn ln passed!")
                 
                 sanity_check.sanity_check_residual(
                     mlp_out,
@@ -529,6 +551,135 @@ class LLM_Hooked():
             output_tuple += (next_token_id, output.logits,)
         return output_tuple
 
+    def embed_forward_pass(self, model_input):
+        with torch.no_grad():
+            input_ids = model_input.input_ids.to(self.get_model_device())
+            embed_tokens = self.get_embed()
+            # Compute Embeddings
+            with torch.inference_mode():
+                hidden_states = embed_tokens(input_ids)
+        return hidden_states
+    
+    def position_embeddings(self, embedding_states):
+        rotary_emb = self.get_rotary()
+        past_seen_tokens = 0
+        cache_position = torch.Tensor(torch.arange(embedding_states.shape[1], device=embedding_states.device) + past_seen_tokens)
+        position_ids = cache_position.unsqueeze(0)
+        position_embeddings = rotary_emb(embedding_states, position_ids=position_ids)
+        return cache_position, position_ids, position_embeddings
+
+    def unembed_forward_pass(self, last_hidden_states):
+        final_norm_layer = self.get_final_norm()
+
+        cpu_linearized_norm = self.linearise_final_norm(last_hidden_states)
+        
+        # Apply Final Norm for Logits
+        final_hidden_states = final_norm_layer(last_hidden_states)
+
+        # Get logits
+        lm_head = self.get_lm_head() 
+        logits = lm_head(final_hidden_states)
+        
+        next_token_logits = logits[-1, :]
+        next_token_id = torch.argmax(next_token_logits, dim=-1)
+
+        return cpu_linearized_norm, next_token_id, logits
+
+
+    def layer_forward_pass(self, model_input, layer_index, hidden_states, causal_mask, position_embeddings, decompose_attention_batch_size: int):
+        """
+        Perform a forward pass on one layer.
+        """
+
+        if len(self.masking_hook_handles) > 0:
+            raise ValueError("[LLM Hooked] You forgot to remove the masking hooks while doing extraction! This might cause troubles. Stop here.")
+
+        # useful dimensions
+        d_batch = 1
+        d_seq = model_input.input_ids.shape[-1]
+        nb_heads = self.get_nb_head()
+        d_hidden = self.get_hidden_size()
+        layer_module = self.get_layers()[layer_index]
+
+        with torch.no_grad():
+            timings = {}
+            start_time_total = time.time()
+
+            # ---------------------------------------------------------
+            # 2. Process one layer
+            # ---------------------------------------------------------
+            timings['decompose_attention'] = 0 # Accumulate time
+            
+            # reinit the buffer to avoid storing all layers into memory
+            self.init_buffers()
+
+            # A. Run the Layer
+            with torch.inference_mode():
+                # HF layers typically return a tuple: (hidden_states, ... )
+                # Hooks attached to this layer will trigger here and populate self.caches
+                layer_outputs = layer_module(hidden_states, attention_mask=causal_mask, position_embeddings=position_embeddings)
+                hidden_states = layer_outputs[0]
+            
+            # B. Process Intermediate Outputs (Hooks should have populated caches)
+            
+            # --- RESIDUAL ---
+            # Extract residual outputs (before final layer norm)
+            current_residual_outputs = self.caches['residual']['output'][layer_index] # (batch, d_seq, d_hidden)
+
+            # --- MLP ---
+            # Retrieve from cache (should contain 1 element for this layer)
+            current_mlp_out = self.caches['mlp']['output'][layer_index] # (batch, d_seq, d_hidden)
+            
+            # Linearize Post MLP Norm
+            post_mlp_norms_linear = self.linearise_post_mlp_norm(current_mlp_out[0], layer_index)
+
+            # --- Attention ---
+            # Retrieve from cache
+            current_values = self.caches['attention']['value'][layer_index] # [batch, head, seq, head_dim]
+            current_attn_weights = self.caches['attention']['attn_weight'][layer_index] #  [batch, head, seq_y, seq_x]
+            current_attn_output = self.caches['attention']['output'][layer_index] # [batch, seq, hidden_dim]
+            
+            # Linearize Post Attn Norm
+            post_attn_norms_linear = self.linearise_post_attention_norm(current_attn_output[0], layer_index)
+
+            # --- Decompose Attention (Heavy Compute) ---
+            t0_decomp = time.time()
+            
+            # Decompose for JUST this layer
+            layer_head_out = self.decompose_attention_with_batching(
+                value=current_values[0],
+                attn_weights=current_attn_weights[0],
+                y_batch_size=decompose_attention_batch_size,
+                x_batch_size=decompose_attention_batch_size,
+                layer=layer_index
+            ) # [layer, seq_y, head, seq_x, hidden_dim] / layer = 1
+
+            # remove layer dimensionm, and add the batch dimension back to the output
+            layer_head_out = layer_head_out[0].unsqueeze(0)# [batch, seq_y, head, seq_x, hidden_dim]
+            
+            # layer_head_out is on CPU because decompose_attention_with_batching moves it there usually.
+            # If not, move it:
+            layer_head_out = layer_head_out.cpu()
+            
+            layer_head_out = layer_head_out.transpose(2, 3) 
+            assert layer_head_out.shape == (d_batch, d_seq, d_seq, nb_heads, d_hidden), f"Invalid shape for head outputs"
+            
+            timings['decompose_attention'] += (time.time() - t0_decomp)
+
+            # --- C. Residual Stream & Cleanup ---
+            # Add output of this layer (which is input to next) to residual stream
+
+            self.do_sanity_checks(hidden_states.unsqueeze(0), current_residual_outputs.unsqueeze(0), None, layer_head_out.unsqueeze(0), current_attn_output.unsqueeze(0), current_mlp_out.unsqueeze(0), post_mlp_norms_linear.unsqueeze(0), post_attn_norms_linear.unsqueeze(0))
+
+            timings['forward_pass'] = time.time() - start_time_total
+
+            # Print timings
+            if self.track_time:
+                print("[LLM Hooked] Timings (in seconds):")
+                for key, value in timings.items():
+                    print(f"[LLM Hooked] {key}: {value:.6f}")
+
+        return hidden_states, current_mlp_out[0], layer_head_out[0], post_mlp_norms_linear, post_attn_norms_linear
 
     def decoder_masked(self, decoder_input, graph_masks):
         raise NotImplementedError("Subclasses should implement this method.")

@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-import torch
+ATTENTION_MASK_VALUE = -65504
 
 def get_real_weight_from_offloaded_module(submodule):
     """
@@ -31,36 +31,62 @@ def get_real_weight_from_offloaded_module(submodule):
 def linearize_rms_norm(rms_norm, input_tensor: torch.Tensor):
     """
     Linearizes a RMS norm operation for a specific input tensor.
-
-    Args:
-        rms_norm: The RMS norm module to linearize.
-        input_tensor (torch.Tensor): The input tensor to the LayerNorm.
-
-    Returns:
-        - L (torch.Tensor): The equivalent affine transformation matrix.
     """
-    
     assert input_tensor.dtype == rms_norm.weight.dtype, "Input tensor and LayerNorm weight must have the same dtype"
     
-    d_seq = input_tensor.shape[-2]  # Sequence length
-    d = input_tensor.shape[-1]      # Hidden size
-
     eps = rms_norm.variance_epsilon 
 
-    # Compute standard deviation from input
-    var = torch.mean(input_tensor.pow(2), dim=-1) #
-    # var = torch.var(input_tensor, dim=-1, unbiased=False)
-    inv_std = torch.rsqrt(var + eps).to(input_tensor.dtype)
-    # Extract gamma (weight) RMSNorm
-    weight = get_real_weight_from_offloaded_module(rms_norm)
-    inv_std = inv_std
+    # 1. Cast to float32 BEFORE squaring to prevent fp16 overflow
+    input_fp32 = input_tensor.to(torch.float32)
+    
+    # 2. Compute variance keeping the dimension
+    var = torch.mean(input_fp32.pow(2), dim=-1, keepdim=True) 
+    
+    inv_std = torch.rsqrt(var + eps)
+    
+    # 3. Extract gamma (weight)
+    weight = get_real_weight_from_offloaded_module(rms_norm).to(inv_std.device)
 
-    weight = weight.to(inv_std.device)
+    return inv_std, weight
 
-    # Compute the affine transformation matrix L
-    L = torch.einsum("s,d->sd" ,inv_std, weight)
 
-    return L
+def apply_linearized_norm(input_tensor, inv_std, weight):
+    input_dtype = input_tensor.dtype
+    normalized_fp32 = input_tensor.to(inv_std.device).to(torch.float32) * inv_std.to(torch.float32)
+    return (weight * normalized_fp32).to(input_dtype)
+
+# def linearize_rms_norm(rms_norm, input_tensor: torch.Tensor):
+#     """
+#     Linearizes a RMS norm operation for a specific input tensor.
+
+#     Args:
+#         rms_norm: The RMS norm module to linearize.
+#         input_tensor (torch.Tensor): The input tensor to the LayerNorm.
+
+#     Returns:
+#         - L (torch.Tensor): The equivalent affine transformation matrix.
+#     """
+
+#     assert input_tensor.dtype == rms_norm.weight.dtype, "Input tensor and LayerNorm weight must have the same dtype"
+    
+#     d_seq = input_tensor.shape[-2]  # Sequence length
+#     d = input_tensor.shape[-1]      # Hidden size
+
+#     eps = rms_norm.variance_epsilon 
+
+#     # Compute standard deviation from input
+#     var = torch.mean(input_tensor.pow(2), dim=-1) #
+#     # var = torch.var(input_tensor, dim=-1, unbiased=False)
+#     inv_std = torch.rsqrt(var + eps).to(input_tensor.dtype)
+#     # Extract gamma (weight) RMSNorm
+#     weight = get_real_weight_from_offloaded_module(rms_norm)
+#     inv_std = inv_std
+
+#     weight = weight.to(inv_std.device)
+#     # Compute the affine transformation matrix L
+#     L = torch.einsum("s,d->sd" ,inv_std, weight)
+
+#     return L
 
 """
 Functions copy/pasted from HF's transformers that are used in LLM_Hooked.
@@ -184,9 +210,31 @@ def MLP_masked(module, hidden_states, graph_mlp_mask):
     Returns:
         hidden_states: Output of the MLP after applying the mask.
     """
-    # Ensure the hidden states are in the correct dtype for the MLP
+    assert NotImplementedError
+    # Ensure the hidden states are in 
+    # the correct dtype for the MLP
     mlp_dtype = module.mlp.up_proj.weight.dtype
     hidden_states = module.mlp(hidden_states.to(mlp_dtype))
+    # Apply the mask if provided: zero out masked positions along the sequence dimension
+    if graph_mlp_mask is not None:
+        hidden_states = torch.einsum('bsd,s->bsd', hidden_states, graph_mlp_mask.to(hidden_states.device))
+    return hidden_states
+
+def Gated_MLP_masked(module, hidden_states, graph_mlp_mask):
+    """
+    Forward pass for the masked MLP in Olmo2 model and others.
+
+    Args:
+        module: The decoder layer module containing the MLP (xxxDecoderLayer).
+        hidden_states: Input tensor of shape [batch, seq_len, hidden_dim].
+        graph_mlp_mask: Mask tensor of shape [seq_len], where 1 means not masked, 0 means masked.
+
+    Returns:
+        hidden_states: Output of the MLP after applying the mask.
+    """
+    # Ensure the hidden states are in the correct dtype for the MLP
+    mlp_dtype = module.mlp.up_proj.weight.dtype
+    hidden_states = module.mlp.down_proj(module.mlp.act_fn(module.mlp.gate_proj(hidden_states.to(mlp_dtype))) * module.mlp.up_proj(hidden_states.to(mlp_dtype)))
     # Apply the mask if provided: zero out masked positions along the sequence dimension
     if graph_mlp_mask is not None:
         hidden_states = torch.einsum('bsd,s->bsd', hidden_states, graph_mlp_mask.to(hidden_states.device))

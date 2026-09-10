@@ -2,7 +2,6 @@ import torch
 import networkx as nx
 from typing import Optional, Tuple
 from tqdm import tqdm
-from src.llm_hooked.llm_hooked import LLM_Hooked
 import src.llm_hooked.sanity_checks as sanity_checks
 import random
 import numpy as np
@@ -106,7 +105,7 @@ def compute_leverage_scores(X, k=None):
     
     return scores
 
-AVAILABLE_IMPORTANCE_MODES = [None, 'cosim', 'norm', 'norm_l2', 'sim', 'ifr', 'lev_1', 'lev_2', 'lev_4', 'lev_8', 'lev_16', 'lev_32', 'lev_64', 'lev_128', 'lev_256']
+AVAILABLE_IMPORTANCE_MODES = [None, 'random', 'cosim', 'norm', 'normf', 'norm_l2', 'sim', 'ifr', 'lev_1', 'lev_2', 'lev_4', 'lev_8', 'lev_16', 'lev_32', 'lev_64', 'lev_128', 'lev_256']
 
 class LLM_Graph_NX(nx.MultiDiGraph):
     """
@@ -117,42 +116,33 @@ class LLM_Graph_NX(nx.MultiDiGraph):
     """
     def __init__(
         self,
-        llm_hooked: Optional[LLM_Hooked] = None,
+        architecture_type: str = None,
+        n_layers: int = None,
+        n_heads: int = None,
+        half_precision: bool = None,
         input_sentence: Optional[str] = None,
         importance_mode: Optional[str] = None,
         **attr
     ):
         """
         Initialize the LLM_Graph.
-        llm_hooked: (optionnal, could be None, for instance when representing the trace)
-        hf_config: Hugging Face config object describing the LLM hyperparameters.
         """
         super().__init__(**attr)
-        self.llm_hooked = llm_hooked
-        if isinstance(input_sentence, str):
-            self.input_sentence = input_sentence
-        elif input_sentence is None:
-            self.input_sentence = None
-        else:
-            self.input_sentence = input_sentence.copy()
-        if llm_hooked is not None:
-            self.architecture_type = llm_hooked.get_architecture_type()
-            self.model_input, n_tokens = self.preprocess_input_sentence()
-            self.graph['n_layers'] = llm_hooked.get_n_layers()
-            self.graph['n_tokens'] = n_tokens
-            self.graph['n_heads'] = llm_hooked.get_nb_head()
+        self.input_sentence = input_sentence.clone() if input_sentence is not None else None
+        self.architecture_type = architecture_type
+        self.model_input, n_tokens = self.preprocess_input_sentence()
+        self.graph['n_layers'] = n_layers
+        self.graph['n_tokens'] = n_tokens
+        self.graph['n_heads'] = n_heads
         self.graph['output_node_index'] = None
         self.graph['input_node_index'] = []
         if importance_mode not in AVAILABLE_IMPORTANCE_MODES:
             raise ValueError(f"Selected importance mode '{importance_mode}' is not available.")
         self.importance_mode = importance_mode
-        # todo add a test_mode that performs sanity checks?
+        self.half_precision = half_precision
 
-    # def from_graph(self, graph: nx.MultiDiGraph):
-    #     # Add nodes
-    #     self.add_nodes_from(graph.nodes(data=True))
-    #     # Add edges with their attributes
-    #     self.add_edges_from(graph.edges(data=True, keys=True))
+    def get_n_tokens(self):
+        return self.graph['n_tokens']
 
     def get_graph_n_layers(self):
         if self.architecture_type == 'sequential':
@@ -196,20 +186,19 @@ class LLM_Graph_NX(nx.MultiDiGraph):
 
     def get_edge_weight_stats(self):
         edges_weight = np.array([
-            d.get('weight').half()
+            d.get('weight')
             for u, v, k, d in self.edges(keys=True, data=True)
         ])
         stats = get_weight_stats(edges_weight)
         return stats
     
     def preprocess_input_sentence(self):
-        if isinstance(self.input_sentence, str):
-            model_input = self.llm_hooked.get_tokenizer()([self.input_sentence], padding=True, return_tensors="pt")
-        elif hasattr(self.input_sentence, 'input_ids'):
-            model_input = self.input_sentence
+        # deprecated
+        if self.input_sentence is None:
+            return None, None
         else:
-            raise ValueError(f"Input sentence {self.input_sentence} has not the correct type. Expecting str or torch.Tensor")
-        return model_input, model_input.input_ids.shape[-1]
+            model_input = self.input_sentence
+            return model_input, model_input.size(-1)
 
     def get_output_node(self):
         return self.graph.get('output_node_index')
@@ -243,29 +232,6 @@ class LLM_Graph_NX(nx.MultiDiGraph):
         # the output node self.graph['output_node_index'] will be updated during the graph population
         # same for input nodes
 
-    def populate_graph_with_importance(self, decompose_attention_batch_size: int, start_token_idx:int =0, mem_eff=True):
-        """
-        Populate the graph using a forward pass from one input sentence.
-        This needs to be implemented with model-specific hooks.
-        The start_token_idx allows to update an already existing graph.
-        It will only iterate and add graph components for tokens from start_token_idx to end.
-        Pass mem_eff=True to use the memory efficient method.
-        """
-        if start_token_idx > 0 and len(self.graph) == 0:
-            raise ValueError(f"[LLM_GRAPH] You cannot update an empty graph")
-        if not mem_eff: # run all layers at once, might use a lot of memory
-            output = self.llm_hooked.forward_pass(self.model_input, decompose_attention_batch_size, output_pred=True)
-            if self.architecture_type == 'sequential':
-                residual_stream, mlp_outputs, head_outputs, linearized_norm, post_mlp_norms_linear, post_attn_norms_linear = output[:6]
-                self.populate_with_edge_importance_sequential(residual_stream, head_outputs, mlp_outputs, linearized_norm, post_attn_norms_linear, post_mlp_norms_linear, start_token_idx) # this operation is model specific
-            else:
-                raise NotImplementedError(f"Graph population from transformer {self.architecture_type} is not implemented.")
-            output_logits = output[-1]
-        else: # run one layer at a time
-            output_logits = self.memeff_populate_with_edge_importance_sequential(self.model_input, decompose_attention_batch_size, start_token_idx)
-        self.remove_disconnected_nodes()
-        return output_logits # return the logit outputed by the model after the forward pass
-        
     def node_idx(self, layer_i: int, token_j: int):
         return layer_i*self.graph['n_tokens'] + token_j
 
@@ -273,7 +239,6 @@ class LLM_Graph_NX(nx.MultiDiGraph):
         layer_i = node_idx // self.graph['n_tokens']
         token_j = node_idx % self.graph['n_tokens']
         return layer_i, token_j
-
 
     def compute_edge_importance_softmax(self, node_vector: torch.Tensor, edge_vectors: torch.Tensor, distance_norm = 1):
         """
@@ -296,8 +261,12 @@ class LLM_Graph_NX(nx.MultiDiGraph):
             node_norm = torch.norm(node_vector, p=distance_norm)  # Scalar
             
             # Original proximity scores (these are our "logits")
-            proximity = (node_norm - distance).clamp(0) # [n_edges]
-            
+            # proximity = (node_norm - distance).clamp(0) # [n_edges]
+            # importance = proximity / proximity.sum()
+
+            # removing the clamp
+            proximity = node_norm - distance # [n_edges]
+            proximity = proximity + proximity.min().abs() # add the min to get everything positive
             importance = proximity / proximity.sum()
         
         elif self.importance_mode.startswith('lev'):
@@ -320,9 +289,13 @@ class LLM_Graph_NX(nx.MultiDiGraph):
 
         elif self.importance_mode == 'norm':
             edge_norm = torch.norm(edge_vectors, p=distance_norm, dim=1)
-            # print('norm', edge_norm)
             importance = edge_norm / edge_norm.sum()
             # print('importance', importance)
+        
+        elif self.importance_mode == 'normf':
+            edge_norm = torch.norm(edge_vectors, p=distance_norm, dim=1)
+            node_norm = torch.norm(node_vector, p=distance_norm)
+            importance = edge_norm / node_norm
         
         elif self.importance_mode == 'norm_l2':
             edge_norm = torch.norm(edge_vectors, p=2, dim=1)
@@ -339,25 +312,6 @@ class LLM_Graph_NX(nx.MultiDiGraph):
 
         return importance
 
-
-    # def compute_edge_importance(self, node_vector: torch.Tensor, edge_vectors: torch.Tensor, distance_norm = 1):
-    #     """
-    #     Compute the importance score of the incoming edges of a node.
-    #     """
-    #     if self.importance_mode == 'dist':
-    #         # Vectorized computation for efficiency
-    #         diff = edge_vectors - node_vector.unsqueeze(0)  # [n_edges, d_h]
-    #         distance = torch.norm(diff, p=distance_norm, dim=1)  # [n_edges]
-    #         node_norm = torch.norm(node_vector, p=distance_norm)  # Scalar
-    #         proximity = (node_norm - distance).clamp(min=EPS)  # [n_edges]
-    #         importance = proximity / proximity.sum()  # [n_edges]
-    #     elif self.importance_mode == 'random':
-    #         n_edges = edge_vectors.shape[0]
-    #         importance = torch.rand(n_edges) # no need to normalise
-    #     else:
-    #         raise ValueError(f"Unsupported mode: {self.importance_mode}")
-
-    #     return importance
 
     def add_attention_sequential_layer_to_graph(
         self,
@@ -398,8 +352,8 @@ class LLM_Graph_NX(nx.MultiDiGraph):
         edge_vectors = torch.cat(edge_vectors, dim=0)
 
         # Compute importance scores for each edge
-        importance = self.compute_edge_importance_softmax(node_vector, edge_vectors)
-
+        importance = self.compute_edge_importance_softmax(node_vector.to(torch.float32), edge_vectors.to(torch.float32))
+        importance = importance.cpu()
         # Add node to the graph
         self.add_node(self.node_idx(graph_layer, token))
 
@@ -410,7 +364,7 @@ class LLM_Graph_NX(nx.MultiDiGraph):
                 self.add_edge(
                     self.node_idx(graph_layer - 1, token),
                     self.node_idx(graph_layer, token),
-                    weight=importance[i],
+                    weight=importance[i].item(),
                     name='residual-attention'
                 )
             else:
@@ -420,7 +374,7 @@ class LLM_Graph_NX(nx.MultiDiGraph):
                 self.add_edge(
                     self.node_idx(graph_layer - 1, src_token),
                     self.node_idx(graph_layer, token),
-                    weight=importance[i],
+                    weight=importance[i].item(),
                     name=f'attention_{label}'
                     )
 
@@ -431,7 +385,6 @@ class LLM_Graph_NX(nx.MultiDiGraph):
         after_mlp: torch.Tensor,
         before_mlp: torch.Tensor,
         mlp_out: torch.Tensor,
-        final_norm_linear: torch.Tensor,
     ):
         """
         Adds MLP-related edges for a given token at a specific layer.
@@ -445,25 +398,18 @@ class LLM_Graph_NX(nx.MultiDiGraph):
             final_norm_linear (torch.Tensor or None): final normalisation).
         """
 
-        if final_norm_linear is not None:
-            # after mlp already contain the last normalisation because it is extracted from the hugging face residual stream
-            mlp_out = torch.einsum('j,j->j', final_norm_linear, mlp_out.to(final_norm_linear.device)).cpu()
-            before_mlp = torch.einsum('j,j->j', final_norm_linear, before_mlp.to(final_norm_linear.device)).cpu()
-
-        if self.llm_hooked.test_mode:
-            sanity_checks.sanity_check_after_mlp(before_mlp, after_mlp, mlp_out, self.llm_hooked.half_precision)
-
         node_vector = after_mlp
         edge_vectors = torch.stack([before_mlp, mlp_out], dim=0)
 
         # Compute importance scores for residual and MLP edges
-        importance = self.compute_edge_importance_softmax(node_vector, edge_vectors)
+        importance = self.compute_edge_importance_softmax(node_vector.to(torch.float32), edge_vectors.to(torch.float32))
+        importance = importance.cpu()
 
         # Add residual connection edge
         self.add_edge(
             self.node_idx(graph_layer - 1, token),
             self.node_idx(graph_layer, token),
-            weight=importance[0],
+            weight=importance[0].item(),
             name='residual-mlp'
         )
 
@@ -471,279 +417,87 @@ class LLM_Graph_NX(nx.MultiDiGraph):
         self.add_edge(
             self.node_idx(graph_layer - 1, token),
             self.node_idx(graph_layer, token),
-            weight=importance[1],
+            weight=importance[1].item(),
             name='mlp'
         )
 
-    def populate_with_edge_importance_sequential(self, residual_stream, head_outputs, mlp_outputs, final_norm_linear, post_attn_norms_linear, post_mlp_norms_linear, start_token_idx):
-        """
-        Build a sequential transformer computation graph (attention before MLP).
-        Each layer is split into two: attention and MLP.
-        TODO: could be improve by computing the all importance scores in one step (unsing batching)
-        Currently is it done node by node.
-        """
-        n_layers, n_tokens, _, n_heads, hidden_dim = head_outputs.shape
-        # residual_stream = [layer, sequence, hidden_dim]
-        # mlp_outputs = [layer, seq, d_hidden]
+        # print(f"[layer={graph_layer}] residual-mlp", importance[0].item())
+        # print(f"[layer={graph_layer}] mlp", importance[1].item())
+
+    def add_edges_from_one_layer(self, layer_index, before_attn, head_out, attn_out, before_mlp, mlp_out, after_mlp, start_token_idx=0):
+        n_tokens, _, n_heads, hidden_dim = head_out.shape
+        # residual_stream = [sequence, hidden_dim]
+        # mlp_outputs = [seq, d_hidden]
         # sanity checks -- control that the dimension matchs
         assert n_tokens == self.graph['n_tokens']
-        assert n_layers == self.graph['n_layers']
         assert n_heads == self.graph['n_heads']
-        assert residual_stream.size(0) == (self.graph['n_layers']+1) # residual stream includes the embedding layer
-        assert residual_stream.size(1) == self.graph['n_tokens']
-        assert residual_stream.size(2) == hidden_dim
-        assert mlp_outputs.size(0) == self.graph['n_layers']
-        assert mlp_outputs.size(1) == self.graph['n_tokens']
-        assert mlp_outputs.size(2) == hidden_dim
+        assert before_attn.size(0) == self.graph['n_tokens']
+        assert before_attn.size(1) == hidden_dim
+        assert mlp_out.size(0) == self.graph['n_tokens']
+        assert mlp_out.size(1) == hidden_dim
 
-        # Add input (layer 0) nodes
-        # input nodes corresponds to the input embeddings
         for token in range(start_token_idx, n_tokens):
-            self.add_node(self.node_idx(0, token))
-            self.add_input_node(self.node_idx(0, token))
+            # update tqdm description instead of printing a new line
+            try:
+                if tqdm._instances:
+                    next(iter(tqdm._instances)).set_description_str(
+                        f"[LLM Graph] Populate graph: token {token} in layer {layer_index}"
+                    )
+            except Exception:
+                pass
+            """
+            # Diagram of one transformer layer (sequential := attention first, then MLP)
+            # Not showing the post attn and post mlp normalisations
+            #
+            # residual_stream[layer][token]  <-- "before_attn"
+            #            |
+            #            |  (norm + self-attention: keys/queries/values -> per-head outputs)
+            #            v
+            # head_out[src_token, head]  -- attention head outputs (for each source token and head)
+            #            |
+            #   (aggregate over src positions and heads)
+            #            v
+            # attn_out  = summed attention contribution for current token
+            #            |
+            # before_mlp = before_attn + attn_out   <-- input to the MLP (:= residual connection before the MLP)
+            #            |
+            #            |  (MLP)
+            #            v
+            # mlp_out   = MLP output contribution for current token
+            #            |
+            # after_mlp = before_mlp + mlp_out = residual_stream[layer + 1][token] (:= residual connection after the MLP)
+            #
+            # Quick reference:
+            # - before_attn: residual_stream[layer][token]
+            # - head_out:    head_outputs[layer, token] with shape [n_tokens, n_heads, hidden_dim];
+            #                head_out[src_token, head] is the per-head vector used as an incoming attention edge
+            # - attn_out:    aggregated attention output for the current token (attn contribution)
+            # - before_mlp:  before_attn + attn_out (node vector before MLP; do NOT include final layer norm)
+            # - mlp_out:     mlp_outputs[layer, token] (MLP contribution edge; do NOT include final layer norm)
+            # - after_mlp:   residual_stream[layer + 1][token] (node vector after MLP; include final layer norm)
+            """
 
-        for layer in tqdm(range(self.graph['n_layers']), desc="[LLM Graph] Populate graph:"):                    
-            for token in range(start_token_idx, n_tokens):
-                # update tqdm description instead of printing a new line
-                try:
-                    if tqdm._instances:
-                        next(iter(tqdm._instances)).set_description_str(
-                            f"[LLM Graph] Populate graph: token {token} in layer {layer}"
+            for offset, layer_type in enumerate(['attention', 'mlp']):
+                current_layer = 1 + 2 * layer_index + offset  # +1 for input, double for attn/mlp split
+                # print(f"[LLM Graph] Layer {layer}; Token {token}; Current Layer {current_layer}")
+
+                if layer_type == 'attention':
+                    self.add_attention_sequential_layer_to_graph(
+                        current_layer,
+                        token, 
+                        before_mlp[token], 
+                        before_attn[token], 
+                        head_out[token],
                         )
-                except Exception:
-                    pass
-                """
-                # Diagram of one transformer layer (sequential := attention first, then MLP)
-                # Not showing the post attn and post mlp normalisations
-                #
-                # residual_stream[layer][token]  <-- "before_attn"
-                #            |
-                #            |  (norm + self-attention: keys/queries/values -> per-head outputs)
-                #            v
-                # head_out[src_token, head]  -- attention head outputs (for each source token and head)
-                #            |
-                #   (aggregate over src positions and heads)
-                #            v
-                # attn_out  = summed attention contribution for current token
-                #            |
-                # before_mlp = before_attn + attn_out   <-- input to the MLP (:= residual connection before the MLP)
-                #            |
-                #            |  (MLP)
-                #            v
-                # mlp_out   = MLP output contribution for current token
-                #            |
-                # after_mlp = before_mlp + mlp_out = residual_stream[layer + 1][token] (:= residual connection after the MLP)
-                #
-                # Quick reference:
-                # - before_attn: residual_stream[layer][token]
-                # - head_out:    head_outputs[layer, token] with shape [n_tokens, n_heads, hidden_dim];
-                #                head_out[src_token, head] is the per-head vector used as an incoming attention edge
-                # - attn_out:    aggregated attention output for the current token (attn contribution)
-                # - before_mlp:  before_attn + attn_out (node vector before MLP; do NOT include final layer norm)
-                # - mlp_out:     mlp_outputs[layer, token] (MLP contribution edge; do NOT include final layer norm)
-                # - after_mlp:   residual_stream[layer + 1][token] (node vector after MLP; include final layer norm)
-                """
-                before_attn = residual_stream[layer][token].detach()
-                head_out = head_outputs[layer, token].detach()
-                if all([norm is not None for norm in post_attn_norms_linear]):
-                    post_attn_norm = post_attn_norms_linear[layer][token]
-                    head_out = torch.einsum('j,thj->thj', post_attn_norm, head_out.to(post_attn_norm.device)).cpu()
-                attn_out = head_out.sum(dim=0).sum(dim=0).detach()
-                before_mlp = before_attn + attn_out
-                mlp_out = mlp_outputs[layer, token].detach()
-                if all([norm is not None for norm in post_mlp_norms_linear]):
-                    post_mlp_norm = post_mlp_norms_linear[layer][token]
-                    mlp_out = torch.einsum('j,j->j', post_mlp_norm, mlp_out.to(post_mlp_norm.device)).cpu()
-                after_mlp = residual_stream[layer + 1][token].detach() # len(residual_stream)=n_layers+1 because it includes the input_embeddings
-
-                # if layer==0:
-                #     print('head_out.shape', head_out.shape)
-                #     if not all(torch.isfinite(attn_out)):
-                #         for head_2 in range(n_heads):
-                #             print(f'head_out/{head_2}', torch.isnan(head_out[:, head_2]).sum())
-
-                if self.llm_hooked.test_mode:
-                    # Sanity check: verify (before_attn + attn_out) ≈ (after_mlp - mlp_out)
-                    if layer < self.graph['n_layers']-1:
-                        sanity_checks.sanity_check_before_mlp(
-                            before_attn, attn_out, after_mlp, mlp_out, self.llm_hooked.half_precision)
-
-                for offset, layer_type in enumerate(['attention', 'mlp']):
-                    current_layer = 1 + 2 * layer + offset  # +1 for input, double for attn/mlp split
-                    # print(f"[LLM Graph] Layer {layer}; Token {token}; Current Layer {current_layer}")
-
-                    if layer_type == 'attention':
-                        self.add_attention_sequential_layer_to_graph(
-                            current_layer,
-                            token, 
-                            before_mlp, 
-                            before_attn, 
-                            head_out,
-                            )
-                    elif layer_type == 'mlp':
-                        self.add_mlp_sequential_layer_to_graph(
-                            current_layer, 
-                            token, 
-                            after_mlp,
-                            before_mlp, 
-                            mlp_out,
-                            final_norm_linear[token] if layer == self.graph['n_layers']-1 else None, # None if not last layer
-                            )
-        # If mode=cosim the edge do not sum to 1
-        # if self.llm_hooked.test_mode:
-        #     # sanity check: Checks that for every node, the sum of incoming edge weights is approximately 1.0.
-        #     self.check_edge_weights_sum_to_one()
-        #     print("[LLM Graph] Sanity check passed succesfully!")
-        # add output node index = last token of last layer
-        self.set_output_node(self.node_idx(current_layer, self.graph['n_tokens']-1))
-
-    def memeff_populate_with_edge_importance_sequential(self, model_input, decompose_attention_batch_size, start_token_idx):
-        """
-        Build a sequential transformer computation graph (attention before MLP).
-        Each layer is split into two: attention and MLP.
-        TODO: could be improve by computing the all importance scores in one step (unsing batching)
-        Currently is it done node by node.
-        """
-
-        n_tokens = self.graph['n_tokens']
-        n_heads = self.graph['n_heads']
-        n_layers = self.graph['n_layers']
-
-        embedding_states = self.llm_hooked.embed_forward_pass(model_input)
-        cache_position, position_ids, position_embeddings = self.llm_hooked.position_embeddings(embedding_states)
-        attention_mask = self.model_input.attention_mask
-
-        causal_mask = create_causal_mask(
-            config=self.llm_hooked.config,
-            input_embeds=embedding_states,
-            attention_mask=attention_mask,
-            cache_position=cache_position,
-            past_key_values=None,
-            position_ids=position_ids,
-        )
-
-        print("causal_mask", causal_mask)
-
-        # Add input (layer 0) nodes
-        # input nodes corresponds to the input embeddings
-        for token in range(start_token_idx, n_tokens):
-            self.add_node(self.node_idx(0, token))
-            self.add_input_node(self.node_idx(0, token))
-
-        hidden_states = embedding_states
-        for layer_index in tqdm(range(n_layers), desc="[LLM Graph] Populate graph:"):
-            layer_output = self.llm_hooked.layer_forward_pass(model_input, layer_index, hidden_states, causal_mask, position_embeddings, decompose_attention_batch_size)
-            residual_stream, mlp_outputs, head_outputs, post_mlp_norms_linear, post_attn_norms_linear = layer_output
-
-            if layer_index == n_layers-1:
-                # if last layer, compute the final norm and lm head
-                final_norm_linear, next_token_id, logits = self.llm_hooked.unembed_forward_pass(residual_stream)
-            else:
-                final_norm_linear=None
-
-            n_tokens, _, n_heads, hidden_dim = head_outputs.shape
-            # residual_stream = [sequence, hidden_dim]
-            # mlp_outputs = [seq, d_hidden]
-            # sanity checks -- control that the dimension matchs
-            assert n_tokens == self.graph['n_tokens']
-            assert n_heads == self.graph['n_heads']
-            assert residual_stream.size(0) == self.graph['n_tokens']
-            assert residual_stream.size(1) == hidden_dim
-            assert mlp_outputs.size(0) == self.graph['n_tokens']
-            assert mlp_outputs.size(1) == hidden_dim
-
-            for token in range(start_token_idx, n_tokens):
-                # update tqdm description instead of printing a new line
-                try:
-                    if tqdm._instances:
-                        next(iter(tqdm._instances)).set_description_str(
-                            f"[LLM Graph] Populate graph: token {token} in layer {layer_index}"
+                elif layer_type == 'mlp':
+                    self.add_mlp_sequential_layer_to_graph(
+                        current_layer, 
+                        token, 
+                        after_mlp[token],
+                        before_mlp[token], 
+                        mlp_out[token],
                         )
-                except Exception:
-                    pass
-                """
-                # Diagram of one transformer layer (sequential := attention first, then MLP)
-                # Not showing the post attn and post mlp normalisations
-                #
-                # residual_stream[layer][token]  <-- "before_attn"
-                #            |
-                #            |  (norm + self-attention: keys/queries/values -> per-head outputs)
-                #            v
-                # head_out[src_token, head]  -- attention head outputs (for each source token and head)
-                #            |
-                #   (aggregate over src positions and heads)
-                #            v
-                # attn_out  = summed attention contribution for current token
-                #            |
-                # before_mlp = before_attn + attn_out   <-- input to the MLP (:= residual connection before the MLP)
-                #            |
-                #            |  (MLP)
-                #            v
-                # mlp_out   = MLP output contribution for current token
-                #            |
-                # after_mlp = before_mlp + mlp_out = residual_stream[layer + 1][token] (:= residual connection after the MLP)
-                #
-                # Quick reference:
-                # - before_attn: residual_stream[layer][token]
-                # - head_out:    head_outputs[layer, token] with shape [n_tokens, n_heads, hidden_dim];
-                #                head_out[src_token, head] is the per-head vector used as an incoming attention edge
-                # - attn_out:    aggregated attention output for the current token (attn contribution)
-                # - before_mlp:  before_attn + attn_out (node vector before MLP; do NOT include final layer norm)
-                # - mlp_out:     mlp_outputs[layer, token] (MLP contribution edge; do NOT include final layer norm)
-                # - after_mlp:   residual_stream[layer + 1][token] (node vector after MLP; include final layer norm)
-                """
-                before_attn = hidden_states[0][token].detach().cpu()
-                head_out = head_outputs[token].detach()
-                if post_attn_norms_linear is not None:
-                    post_attn_norm = post_attn_norms_linear[token]
-                    head_out = torch.einsum('j,thj->thj', post_attn_norm, head_out.to(post_attn_norm.device)).cpu()
-                attn_out = head_out.sum(dim=0).sum(dim=0).detach()
-                before_mlp = before_attn + attn_out
-                mlp_out = mlp_outputs[token].detach()
-                if post_mlp_norms_linear is not None:
-                    post_mlp_norm = post_mlp_norms_linear[token]
-                    mlp_out = torch.einsum('j,j->j', post_mlp_norm, mlp_out.to(post_mlp_norm.device)).cpu()
-                after_mlp = residual_stream[token].detach()
-
-                if self.llm_hooked.test_mode:
-                    # Sanity check: verify (before_attn + attn_out) ≈ (after_mlp - mlp_out)
-                    if layer_index < self.graph['n_layers']-1:
-                        sanity_checks.sanity_check_before_mlp(
-                            before_attn, attn_out, after_mlp, mlp_out, self.llm_hooked.half_precision)
-
-                for offset, layer_type in enumerate(['attention', 'mlp']):
-                    current_layer = 1 + 2 * layer_index + offset  # +1 for input, double for attn/mlp split
-                    # print(f"[LLM Graph] Layer {layer}; Token {token}; Current Layer {current_layer}")
-
-                    if layer_type == 'attention':
-                        self.add_attention_sequential_layer_to_graph(
-                            current_layer,
-                            token, 
-                            before_mlp, 
-                            before_attn, 
-                            head_out,
-                            )
-                    elif layer_type == 'mlp':
-                        self.add_mlp_sequential_layer_to_graph(
-                            current_layer, 
-                            token, 
-                            after_mlp,
-                            before_mlp, 
-                            mlp_out,
-                            final_norm_linear[token] if layer_index == self.graph['n_layers']-1 else None, # None if not last layer
-                            )
-            # update the hidden states for the next layer
-            hidden_states = residual_stream.unsqueeze(0) # be careful, maybe we should add back the batch dimension
-
-        # if self.llm_hooked.test_mode:
-        #     # sanity check: Checks that for every node, the sum of incoming edge weights is approximately 1.0.
-        #     self.check_edge_weights_sum_to_one()
-        #     print("[LLM Graph] Sanity check passed succesfully!")
-        # add output node index = last token of last layer
-        self.set_output_node(self.node_idx(current_layer, self.graph['n_tokens']-1))
-        return logits
-
-
+        
     def check_edge_weights_sum_to_one(self, atol=1e-3):
         """
         Checks that for every node, the sum of incoming edge weights is approximately 1.0.
@@ -884,7 +638,6 @@ class LLM_Graph_NX(nx.MultiDiGraph):
         
         The graph structure is serialized using networkx.json_graph,
         and other safe attributes are stored in a dictionary.
-        The 'llm_hooked' attribute is explicitly NOT saved.
         """
         
         # 1. Serialize the graph data (nodes, edges, self.graph attributes)
@@ -912,7 +665,6 @@ class LLM_Graph_NX(nx.MultiDiGraph):
         
         The graph structure is serialized using networkx.json_graph,
         and other safe attributes are stored in a dictionary.
-        The 'llm_hooked' attribute is explicitly NOT saved.
         """
         data_to_save = self.pre_save()
         
@@ -926,12 +678,11 @@ class LLM_Graph_NX(nx.MultiDiGraph):
 
 
 
-def load_from_dict(data_to_load: dict, llm_hooked: LLM_Hooked):
+def load_from_dict(data_to_load: dict):
     """
     Loads graph data from a dict and reconstructs
     the LLM_Graph_NX object.
     
-    Requires an active llm_hooked object to be passed in.
     """
     # 2. Re-hydrate the core NetworkX graph from the dictionary
     try:
@@ -941,10 +692,7 @@ def load_from_dict(data_to_load: dict, llm_hooked: LLM_Hooked):
         return None
         
     # 3. Create a new LLM_Graph_NX instance.
-    # We pass the essential, non-serialized llm_hooked object
-    # and the saved input_sentence.
     new_llm_graph = LLM_Graph_NX(
-        llm_hooked=llm_hooked,
         input_sentence=data_to_load.get('input_sentence')
     )
     
@@ -960,7 +708,7 @@ def load_from_dict(data_to_load: dict, llm_hooked: LLM_Hooked):
     new_llm_graph.importance_mode = data_to_load.get('importance_mode', None)
     
     # 7. Re-set the model_input based on the loaded sentence and new hook
-    if new_llm_graph.input_sentence and new_llm_graph.llm_hooked:
+    if new_llm_graph.input_sentence:
          new_llm_graph.model_input, _ = new_llm_graph.preprocess_input_sentence()
     else:
          new_llm_graph.model_input = None
@@ -968,13 +716,11 @@ def load_from_dict(data_to_load: dict, llm_hooked: LLM_Hooked):
     return new_llm_graph
 
 
-def load_from_file(file_path: str, llm_hooked: LLM_Hooked):
+def load_from_file(file_path: str):
     """
     Loads graph data from a pickle file and reconstructs
     the LLM_Graph_NX object.
-    
-    Requires an active llm_hooked object to be passed in.
-    """
+        """
     if not os.path.exists(file_path):
         print(f"[LLM_Graph_NX] Error: File not found at {file_path}")
         return None
@@ -987,7 +733,7 @@ def load_from_file(file_path: str, llm_hooked: LLM_Hooked):
         print(f"[LLM_Graph_NX] Error loading pickle file: {e}")
         return None
 
-    new_llm_graph = load_from_dict(data_to_load, llm_hooked)
+    new_llm_graph = load_from_dict(data_to_load)
     
     print(f"[LLM_Graph_NX] Successfully loaded from {file_path}")
     return new_llm_graph

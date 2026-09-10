@@ -10,14 +10,16 @@ This script is designed for local testing and debugging. It:
 5. (GPU) Evaluates the predictive power of each stratum by measuring reconstruction error.
 """
 
-# Import the factory function to get the correct model-specific class
-from src.llm_hooked.hook_constructors import get_hooked_constructor
-
 # Import the main orchestration class
-from src.llm_trace.llm_trace import LLM_STRACE
+from src.llm_trace.llm_trace_2 import LLM_STRACE
+from src.modified_transformers.utils import get_model_class, identify_model_type, load_gemma3
+from transformers import AutoTokenizer
+from src.llm_trace.llm_trace_2 import THRESHOLD_STRACE
+from accelerate import cpu_offload
 
 import time
 import argparse # For handling command-line arguments
+import torch
 
 AVAILABLE_MODELS = [
     "mistralai/Mistral-7B-v0.1",
@@ -28,6 +30,7 @@ AVAILABLE_MODELS = [
     "Qwen/Qwen3-1.7B-Base",
     "Qwen/Qwen3-4B-Base",
     "Qwen/Qwen3-8B-Base",
+    "Qwen/Qwen3-14B-Base",
     "google/gemma-3-270m",
     "Qwen/Qwen2.5-0.5B",
     "Qwen/Qwen2.5-1.5B",
@@ -38,6 +41,13 @@ AVAILABLE_MODELS = [
     "Qwen/Qwen2-0.5B",
     "Qwen/Qwen2-1.5B",
     "Qwen/Qwen2-7B",
+    "google/gemma-3-4b-pt",
+    "meta-llama/Llama-3.1-8B",
+    "mistralai/Mistral-7B-v0.1",
+    "deepseek-ai/deepseek-llm-7b-base",
+    "microsoft/phi-4",
+    "meta-llama/Llama-2-7b-hf",
+    "meta-llama/Llama-2-13b-hf"
 ]
 
 def main(model_name):
@@ -75,7 +85,7 @@ def main(model_name):
     # half_precision: If True (recommended), load the model in float16 to save VRAM.
     # Set to False for higher precision (float32).
     # For some reason, half_precision might cause approximation error that you don't have with full precision
-    half_precision = True 
+    half_precision = False 
     
     # untrained: If True, load a "blank" model with randomized weights
     # for debugging or analysis. /!\ Not tested
@@ -95,7 +105,7 @@ def main(model_name):
     # 'nucleus': (Recommended) Keeps the most important incoming edges
     #            that sum up to a cumulative mass 'tau' (like Top-P).
     # 'threshold': Keeps all edges with a weight strictly greater than 'tau'.
-    strace_mode = 'threshold'
+    strace_mode = 'size' #'threshold'
     
     # threshold_values: A manually defined list of 'tau' values.
     # The script will extract one stratum for each value in this list.
@@ -105,11 +115,23 @@ def main(model_name):
     #     1.0, .9995, .999, .995, .99, .985, .98, .975, .97, .96, .95,
     #     .9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1
     # ]
-    threshold_values = [
-        1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
-    ]
-    
+    # threshold_values = [
+    #     -1.0, 1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
+    # ]
+
+    if strace_mode == 'size':
+        threshold_values = [
+            1e-5,
+            1e-4, 2e-4, 4e-4, 8e-4,
+            1e-3, 1.2e-3, 1.4e-3, 2e-3, 3e-3, 4e-3, 6e-3, 8e-3,
+            1e-2, 2e-2, 4e-2, 6e-2, 8e-2,
+            1e-1, 2e-1, 4e-1, 6e-1, 8e-1
+        ]
+    else:
+        threshold_values = THRESHOLD_STRACE['_'.join([importance_mode, strace_mode])]
     FREEZE = None #'mlp'
+
+    CPU_OFFLOAD = False
 
     # --- 3. Initialize the Hooked Model ---
     
@@ -117,37 +139,41 @@ def main(model_name):
     start_time = time.time()
     
     # Use the factory to get the correct class constructor
-    # (e.g., Mistral_Hooked, Olmo_Hooked, etc.)
-    HOOKED_CONSTRUCTOR = get_hooked_constructor(model_name)
-    
-    # Instantiate the hooked model. This is where the model is
-    # actually downloaded (if needed) and loaded into GPU VRAM.
-    llm_hooked = HOOKED_CONSTRUCTOR(
-        model_name,
-        half_precision=half_precision,
-        untrained=untrained
-    )
-    print(f"[MAIN] Time to initialise LLM_Hooked: {time.time() - start_time:.2f} seconds")
-    
-    # Enable internal performance timers within the llm_hooked object.
-    llm_hooked.turn_time_tracking_on()
-    
-    # Enable internal sanity checks (e.g., asserting that
-    # decomposed vectors sum back to the original vector).
-    # llm_hooked.turn_test_mode_on()
+    model_type = identify_model_type(args.model_name)
+    hf_constructor = get_model_class(model_type)
+    if CPU_OFFLOAD:
+        if 'gemma-3' in args.model_name:
+            llm = load_gemma3(model_name, half_precision, cuda=False)
+        else:
+            llm = hf_constructor.from_pretrained(
+                args.model_name,
+                # device_map="cpu",
+                attn_implementation="eager",
+                use_safetensors=True,
+                torch_dtype=torch.float16 if half_precision else torch.float32
+            )
+        llm = cpu_offload(llm, execution_device="cuda:0")
+    else:
+        if 'gemma-3' in args.model_name:
+            llm = load_gemma3(model_name, half_precision, cuda=True)
+        else:
+            llm = hf_constructor.from_pretrained(
+                args.model_name,
+                device_map="auto",
+                # max_memory={0: "22GB", "cpu": "60GB"}, # Leave 2GB GPU RAM free for your hidden_states/activations
+                attn_implementation="eager",
+                use_safetensors=True,
+                torch_dtype=torch.float16 if half_precision else torch.float32
+            )
 
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+    print(f"[MAIN] Time to initialise {model_name}: {time.time() - start_time:.2f} seconds")
+    
     # --- 4. Main Processing Loop ---
     # Iterate over each sentence in the selected test dataset.
     
     for i, (input_sentence, gt_next) in enumerate(sentences):
         
-        # --- 4a. Register Hooks ---
-        # Ensure the PyTorch hooks are attached to the model.
-        # This is inside the loop because they are removed
-        # later to compute reconstruction error.
-        if not llm_hooked.extraction_hook_registred():
-            llm_hooked.register_extraction_hooks()
-
         print(f"\n[MAIN] SENTENCE {i}: '{input_sentence}'")
         
         # -----------------------------------------------------------------
@@ -158,21 +184,21 @@ def main(model_name):
         # Initialise the main LLM_STRACE object for this sentence.
         # It holds the model, the input, and will manage the graph.
         start_time = time.time()
-        strace = LLM_STRACE((input_sentence, gt_next), llm_hooked, track_time=True)
-        strace.freeze_strace(FREEZE)
+        strace = LLM_STRACE(
+            sentence=input_sentence,
+            next_word=gt_next, 
+            llm=llm, 
+            tokenizer=tokenizer,
+            track_time=True)
+        # strace.freeze_strace(FREEZE)
         print(f"[MAIN]   Time to initialise LLM_STRACE: {time.time() - start_time:.2f} s")
 
-        # Create the graph structure (nodes and edges, but no weights yet).
-        start_time = time.time()
-        strace.initialize_graph(importance_mode)
-        print(f"[MAIN]   Time to initialise LLM_Graph_NX: {time.time() - start_time:.2f} s")
-        
         # This is the most compute-intensive part of Stage 1.
         # It runs a full forward pass, uses the hooks to capture
         # all activations, and computes the importance weight for
         # every edge in the graph.
         start_time = time.time()
-        strace.populate_graph(batch_size)
+        strace.populate_graph(batch_size, importance_mode, unit_test=True)
         print(f"[MAIN]   Time to populate graph with importance: {time.time() - start_time:.2f} s")
         
         # -----------------------------------------------------------------
@@ -192,12 +218,6 @@ def main(model_name):
         # -----------------------------------------------------------------
         print("[MAIN] Stage 3: Computing Reconstruction Error (GPU)...")
         
-        # CRITICAL STEP: The extraction hooks (which capture activations)
-        # MUST be removed before we run the model again for evaluation.
-        # Otherwise, the model's forward pass will be intercepted
-        # and we can't get a clean "reconstruction" run.
-        llm_hooked.remove_extraction_hooks()
-
         # This is the second GPU-heavy part.
         # It loops through all the strata (subgraphs) extracted in Stage 2.
         # For each stratum, it "masks" the model to *only* use the
