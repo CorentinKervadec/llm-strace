@@ -86,3 +86,4 @@ WORKBENCH.sh
 !data/
 !analyse/
 !find_max_context/
+!test/
