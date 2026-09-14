@@ -82,6 +82,7 @@ WORKBENCH.sh
 !src/llm_graph/
 !src/llm_hooked/
 !src/llm_trace/
+!src/modified_transformers/
 !data/
 !analyse/
 !find_max_context/
