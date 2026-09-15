@@ -11,6 +11,7 @@ This script is designed for local testing and debugging. It:
 
 # Import the main orchestration class
 from src.llm_trace.llm_trace_2 import LLM_STRACE
+from src.llm_trace.log_utils import SuppressUnitTestLogs
 from src.modified_transformers.utils import get_model_class, identify_model_type
 from transformers import AutoTokenizer
 from accelerate import cpu_offload
@@ -135,15 +136,16 @@ def main(model_name: str):
             next_word=gt_next, # only used for computing perplexity, can be set to dummy value
             llm=llm, 
             tokenizer=tokenizer,
-            track_time=True # for debugging, track the time spent in each step
         )
         print(f"[MAIN]   Time to initialize LLM_STRACE: {time.time() - start_time:.2f} s")
 
         start_time = time.time()
-        strace.populate_graph(
-            importance_mode, # how the edge importance is computed
-            unit_test=True # perform test to control that the LLM integrity is preserved
-            )
+        # Wrap populate_graph to catch and process unit_test logs
+        with SuppressUnitTestLogs():
+            strace.populate_graph(
+                importance_mode, # how the edge importance is computed
+                unit_test=True # perform test to control that the LLM integrity is preserved
+                )
         print(f"[MAIN]   Time to populate graph: {time.time() - start_time:.2f} s")
         
         # --- STAGE 2: STRATA EXTRACTION (CPU) ---
@@ -163,7 +165,7 @@ def main(model_name: str):
         print(f"[MAIN]   Time to compute stratum reco error: {time.time() - start_time:.2f} s")
 
         # --- Display Results ---
-        strace.print_graph_sizes_and_thresholds()
+        strace.print_graph_sizes_and_thresholds_friendly()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

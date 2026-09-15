@@ -274,7 +274,7 @@ class LLM_STRACE:
         self.strata_loss = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
         self.strata_entropy = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
 
-    def populate_graph(self, importance_mode, print_stats=True, unit_test=False):
+    def populate_graph(self, importance_mode, print_stats=False, unit_test=False):
         device = 'cuda'
         with torch.no_grad():
             output, graph = self.llm(
@@ -774,6 +774,72 @@ class LLM_STRACE:
                 f"{tv_str:<15}{nu_str:<15}{top5_nucleus_str:<25}{inv_nu_str:<15}"
                 f"{inv_top5_nucleus_str:<25}{r_nu_str:<15}{r_inv_nu_str:<15}"
             )
+
+    def print_graph_sizes_and_thresholds_friendly(self):
+        """
+        Prints a clean, paper-aligned summary of the s-Trace evaluation results:
+        1. Relative Trace Size (s = |Es| / |E|)
+        2. Reconstruction Error (Total Variation distance)
+        3. Random Baseline TV Error (for comparison)
+        4. Computation Phase (Construction, Minimal Core, or Refinement)
+        """
+        n_strata = len(self.strata_index) if self.strata_index else 0
+        if n_strata == 0:
+            print("[STRACE] No strata data available to display yet.")
+            return
+
+        # Helper function to extract and pad lists safely
+        def get_safe_list(source, key1=None, key2=None):
+            lst = source
+            try:
+                if key1 is not None:
+                    lst = lst.get(key1) if isinstance(lst, dict) else lst[key1]
+                if key2 is not None and lst is not None:
+                    lst = lst.get(key2) if isinstance(lst, dict) else lst[key2]
+            except (KeyError, TypeError, AttributeError):
+                lst = None
+                
+            if not lst: 
+                return [None] * n_strata
+            if len(lst) < n_strata:
+                lst = list(lst) + [None] * (n_strata - len(lst))
+            return lst
+
+        # Extract primary metrics
+        rel_size_list = get_safe_list(self.strata_rel_size)
+        tv_trace_only = get_safe_list(self.strata_reco_tv, 'trace', 'only')
+        tv_random_only = get_safe_list(self.strata_reco_tv, 'random', 'only')
+
+        # Column Headers
+        header = f"{'Rel. Size (s)':<20}{'TV Error (Trace)':<20}{'TV Error (Rand)':<20}{'Stage / Phase':<22}"
+        separator = "-" * len(header)
+
+        print("\n" + "=" * len(header))
+        print("[s-Trace] COMPUTATIONAL DENSITY & RECONSTRUCTION SUMMARY")
+        print("=" * len(header))
+        print(header)
+        print(separator)
+
+        for s_rel, tv_t, tv_r in zip(rel_size_list, tv_trace_only, tv_random_only):
+            
+            # Format relative size as both percentage and scientific notation
+            size_str = f"{s_rel * 100:6.3f}% ({s_rel:.1e})" if s_rel is not None else "N/A"
+            tv_t_str = f"{tv_t:.4f}" if tv_t is not None else "N/A"
+            tv_r_str = f"{tv_r:.4f}" if tv_r is not None else "N/A"
+
+            # Annotate stages according to paper definitions (Table 2 & Section 4.1)
+            phase_str = ""
+            if s_rel is not None:
+                if 8e-4 <= s_rel <= 1.4e-3:
+                    phase_str = "★ Minimal Core (~10⁻³)"
+                elif s_rel < 1e-2:
+                    phase_str = "Construction Phase"
+                else:
+                    phase_str = "Refinement Phase"
+
+            print(f"{size_str:<20}{tv_t_str:<20}{tv_r_str:<20}{phase_str:<22}")
+
+        print(separator + "\n")
 
     def print_graph_sizes_and_thresholds_short(self):
         """
