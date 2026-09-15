@@ -31,7 +31,7 @@ source activate unnatural_prompt
 : "${STRACE:?STRACE not set}"
 
 # Run the CPU-bound Python script
-python 2_stratification_cpu_2.py \
+python 2_stratification_cpu.py \
     --chunk_id $SLURM_ARRAY_TASK_ID \
     --chunk_size $CHUNK_SIZE \
     --total_sentences $TOTAL_SENTENCES \
