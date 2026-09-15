@@ -37,7 +37,7 @@ AVAILABLE_MODELS = [
     "Qwen/Qwen2.5-32B",
     "Qwen/Qwen2-0.5B",
     "Qwen/Qwen2-1.5B",
-    "Qwen/Qwen2-7B",,
+    "Qwen/Qwen2-7B",
     "meta-llama/Llama-3.1-8B",
     "mistralai/Mistral-7B-v0.1",
     "deepseek-ai/deepseek-llm-7b-base",
