@@ -1,18 +1,17 @@
 """
-Main testing script for the LLM_STRACE (Language Model Stratified/Soft Tracing)
-pipeline.
+Main testing script for the LLM_STRACE pipeline.
 
 This script is designed for local testing and debugging. It:
 1. Loads a specified language model with hooks.
 2. Processes a small, hard-coded set of test sentences.
 3. (GPU) Populates a full computation graph with edge importance scores.
-4. (CPU) Extracts "strata" (subgraphs) from the full graph based on a set of thresholds.
-5. (GPU) Evaluates the predictive power of each stratum by measuring reconstruction error.
+4. (CPU) Extracts "s-traces" (subgraphs) from the full graph based on a set of target sizes.
+5. (GPU) Evaluates the predictive power of each s-trace by measuring reconstruction error.
 """
 
 # Import the main orchestration class
 from src.llm_trace.llm_trace_2 import LLM_STRACE
-from src.modified_transformers.utils import get_model_class, identify_model_type, load_gemma3
+from src.modified_transformers.utils import get_model_class, identify_model_type
 from transformers import AutoTokenizer
 from src.llm_trace.llm_trace_2 import THRESHOLD_STRACE
 from accelerate import cpu_offload
@@ -31,7 +30,6 @@ AVAILABLE_MODELS = [
     "Qwen/Qwen3-4B-Base",
     "Qwen/Qwen3-8B-Base",
     "Qwen/Qwen3-14B-Base",
-    "google/gemma-3-270m",
     "Qwen/Qwen2.5-0.5B",
     "Qwen/Qwen2.5-1.5B",
     "Qwen/Qwen2.5-3B",
@@ -40,8 +38,7 @@ AVAILABLE_MODELS = [
     "Qwen/Qwen2.5-32B",
     "Qwen/Qwen2-0.5B",
     "Qwen/Qwen2-1.5B",
-    "Qwen/Qwen2-7B",
-    "google/gemma-3-4b-pt",
+    "Qwen/Qwen2-7B",,
     "meta-llama/Llama-3.1-8B",
     "mistralai/Mistral-7B-v0.1",
     "deepseek-ai/deepseek-llm-7b-base",
@@ -74,7 +71,7 @@ def main(model_name):
     ]
     sentences_20 = [
         ("In the absence of Bangladesh's opening bowler, Mortaza, Australia opened the innings with Andrew Symonds and Michael", "Bevan"),
-        # ("Its southern terminus is at an intersection with NY 383 in the village of Scottsville. The northern end of",  "the")
+        ("Its southern terminus is at an intersection with NY 383 in the village of Scottsville. The northern end of",  "the")
     ]
     
     # --- Select the dataset to run this test with ---
@@ -85,27 +82,23 @@ def main(model_name):
     # half_precision: If True (recommended), load the model in float16 to save VRAM.
     # Set to False for higher precision (float32).
     # For some reason, half_precision might cause approximation error that you don't have with full precision
+    # But: half precision can mees up the test because it induces some inprecision
     half_precision = False 
     
     # untrained: If True, load a "blank" model with randomized weights
-    # for debugging or analysis. /!\ Not tested
+    # for debugging or analysis. /!\ Not tested, might not work
     untrained = False
     
     # importance_mode: How to calculate edge weights in the graph.
     # 'norm': Use the L1-norm of the contribution vector.
-    # todo: implement more importance modes.
+    # others: 'random', 'cosim', 'normf', 'norm_l2', 'sim', 'ifr'
     importance_mode = 'norm'
     
     # batch_size: How many operations to batch together during the
     # graph population step (e.g., attention decomposition).
     # Reduce the batch size if you get memory issues.
+
     batch_size = 1
-    
-    # strace_mode: The algorithm used to extract subgraphs (strata).
-    # 'nucleus': (Recommended) Keeps the most important incoming edges
-    #            that sum up to a cumulative mass 'tau' (like Top-P).
-    # 'threshold': Keeps all edges with a weight strictly greater than 'tau'.
-    strace_mode = 'size' #'threshold'
     
     # threshold_values: A manually defined list of 'tau' values.
     # The script will extract one stratum for each value in this list.
@@ -142,29 +135,23 @@ def main(model_name):
     model_type = identify_model_type(args.model_name)
     hf_constructor = get_model_class(model_type)
     if CPU_OFFLOAD:
-        if 'gemma-3' in args.model_name:
-            llm = load_gemma3(model_name, half_precision, cuda=False)
-        else:
-            llm = hf_constructor.from_pretrained(
-                args.model_name,
-                # device_map="cpu",
-                attn_implementation="eager",
-                use_safetensors=True,
-                torch_dtype=torch.float16 if half_precision else torch.float32
-            )
+        llm = hf_constructor.from_pretrained(
+            args.model_name,
+            # device_map="cpu",
+            attn_implementation="eager",
+            use_safetensors=True,
+            torch_dtype=torch.float16 if half_precision else torch.float32
+        )
         llm = cpu_offload(llm, execution_device="cuda:0")
     else:
-        if 'gemma-3' in args.model_name:
-            llm = load_gemma3(model_name, half_precision, cuda=True)
-        else:
-            llm = hf_constructor.from_pretrained(
-                args.model_name,
-                device_map="auto",
-                # max_memory={0: "22GB", "cpu": "60GB"}, # Leave 2GB GPU RAM free for your hidden_states/activations
-                attn_implementation="eager",
-                use_safetensors=True,
-                torch_dtype=torch.float16 if half_precision else torch.float32
-            )
+        llm = hf_constructor.from_pretrained(
+            args.model_name,
+            device_map="auto",
+            # max_memory={0: "22GB", "cpu": "60GB"}, # Leave 2GB GPU RAM free for your hidden_states/activations
+            attn_implementation="eager",
+            use_safetensors=True,
+            torch_dtype=torch.float16 if half_precision else torch.float32
+        )
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
     print(f"[MAIN] Time to initialise {model_name}: {time.time() - start_time:.2f} seconds")
@@ -194,11 +181,11 @@ def main(model_name):
         print(f"[MAIN]   Time to initialise LLM_STRACE: {time.time() - start_time:.2f} s")
 
         # This is the most compute-intensive part of Stage 1.
-        # It runs a full forward pass, uses the hooks to capture
-        # all activations, and computes the importance weight for
+        # It runs a full forward pass,
+        # and computes the importance weight for
         # every edge in the graph.
         start_time = time.time()
-        strace.populate_graph(batch_size, importance_mode, unit_test=True)
+        strace.populate_graph(importance_mode, unit_test=True)
         print(f"[MAIN]   Time to populate graph with importance: {time.time() - start_time:.2f} s")
         
         # -----------------------------------------------------------------
@@ -210,7 +197,7 @@ def main(model_name):
         # algorithms (e.g., backward BFS) to find the 'nucleus'
         # subgraphs for each threshold value.
         start_time = time.time()
-        strace.extract_strace(threshold_values, mode=strace_mode)
+        strace.extract_strace(threshold_values)
         print(f"[MAIN]   Time to extract strace: {time.time() - start_time:.2f} s")
         
         # -----------------------------------------------------------------

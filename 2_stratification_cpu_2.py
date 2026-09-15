@@ -10,26 +10,21 @@ def main():
     parser.add_argument('--total_sentences', type=int, required=True, help='Total number of sentences in the dataset.')
     parser.add_argument('--intermediate_dir', type=str, required=True, help='Directory to load intermediate graphs from.')
     parser.add_argument('--strace_dir', type=str, required=True, help='Directory to save strace results (for stage 3).')
-    parser.add_argument('--strace', type=str, required=True, help='Strace extraction mode')
     parser.add_argument('--importance', type=str, required=True, help='Importance mode')
     parser.add_argument('--freeze', type=str, default=None, help='Freeze "attention" or "mlp"')
     args = parser.parse_args()
 
     # --- Parameters ---
-    strace_mode = args.strace # 'nucleus' or 'threshold'
     importance_mode = args.importance
     
-    if strace_mode == 'size':
-        threshold_values = [
-            1e-5, 2e-5, 4e-5, 8e-5,
-            1e-4, 2e-4, 4e-4, 8e-4,
-            1e-3, 1.2e-3, 1.4e-3, 2e-3, 3e-3, 4e-3, 6e-3, 8e-3,
-            1e-2, 2e-2, 4e-2, 6e-2, 8e-2,
-            1e-1, 2e-1, 4e-1, 6e-1, 8e-1
-        ]
-    else:
-        threshold_values = THRESHOLD_STRACE['_'.join([importance_mode, strace_mode])]
-
+    threshold_values = [
+        1e-5, 2e-5, 4e-5, 8e-5,
+        1e-4, 2e-4, 4e-4, 8e-4,
+        1e-3, 1.2e-3, 1.4e-3, 2e-3, 3e-3, 4e-3, 6e-3, 8e-3,
+        1e-2, 2e-2, 4e-2, 6e-2, 8e-2,
+        1e-1, 2e-1, 4e-1, 6e-1, 8e-1
+    ]
+    
     # --- Calculate sentence range for this job ---
     start_index = args.chunk_id * args.chunk_size
     end_index = min((args.chunk_id + 1) * args.chunk_size, args.total_sentences)
@@ -52,7 +47,7 @@ def main():
         
         print(f"[CPU-JOB {sentence_index}] Starting strace extraction...")
         start_time = time.time()
-        strace.extract_strace(threshold_values, mode=strace_mode)
+        strace.extract_strace(threshold_values)
         print(f"[CPU-JOB {sentence_index}] Time to extract strace: {time.time() - start_time:.2f} s")
         
         # --- Save Intermediate Strace Result ---

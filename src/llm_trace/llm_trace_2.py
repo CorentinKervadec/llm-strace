@@ -181,11 +181,6 @@ def get_intersection_nucleus(original_logits,graph_logits):
 
     sorted_graph_indices = np.argsort(graph_probs)[::-1]
     cumulative_graph = np.cumsum(graph_probs[sorted_graph_indices])
-    # print("Get nucleus")
-    # print("sorted_indices", sorted_indices)
-    # print("cumulative_orig", cumulative_orig)
-    # print("sorted_graph_indices", sorted_graph_indices)
-    # print("cumulative_graph", cumulative_graph)
 
     p_candidates = [1, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 99]
     shared_nucleus = 0
@@ -260,22 +255,6 @@ def get_nucleus(logits: torch.Tensor, p: float) -> torch.Tensor:
     # The nucleus set is the opposite of the "remove" mask
     mask_to_keep_sorted = torch.logical_not(mask_to_remove_sorted)
     
-
-    # # --- 6. Map Back to Original Indices ---
-    # # We now have the correct True/False mask, but it's relative
-    # # to the *sorted* order. We need to "un-sort" it to match
-    # # the original logit tensor's order.
-    
-    # # Create an empty boolean mask with the same shape as probs
-    # final_mask = torch.zeros_like(mask_to_keep_sorted)
-    
-    # # Use scatter_ to place the True/False values at their
-    # # original positions.
-    # final_mask.scatter_(dim=-1, index=sorted_indices, src=mask_to_keep_sorted)
-    
-    # # --- 7. Format Output ---
-    # # Return a 1D tensor of indices
-    # return torch.where(final_mask)[0]
     return sorted_indices[mask_to_keep_sorted]
 
 
@@ -331,9 +310,6 @@ class LLM_STRACE:
             input_ids = sentence.input_ids.long()
             full_sentence_tokens = torch.cat([input_ids, torch.tensor(tokenized_next_word).unsqueeze(0)], dim=1)
             attention_mask = sentence.attention_mask
-        # # send to model's device
-        # input_ids = input_ids.to(self.llm.device)
-        # attention_mask = attention_mask.to(self.model.device)
 
         labels = torch.full_like(input_ids, -100)
         labels[0, -1] = full_sentence_tokens[0, -1]
@@ -366,7 +342,7 @@ class LLM_STRACE:
         self.strata_loss = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
         self.strata_entropy = {'random': {'inverse': [], 'only': []}, 'trace': {'inverse': [], 'only': []}}
 
-    def populate_graph(self, batch_size, importance_mode, print_stats=True, unit_test=False):
+    def populate_graph(self, importance_mode, print_stats=True, unit_test=False):
         device = 'cuda'
         with torch.no_grad():
             output, graph = self.llm(
@@ -685,7 +661,7 @@ class LLM_STRACE:
         return stratum_sizes, is_connected_list, time_stats
 
 
-    def extract_strace(self, threshold_values: list[float], mode: str):
+    def extract_strace(self, threshold_values: list[float]):
         """
         Extract stratified traces at different weight thresholds.
         Args:
@@ -703,7 +679,7 @@ class LLM_STRACE:
         self.nb_strata = len(threshold_values) + 1 # +1 because we also include the full graph
         stratum_index = self.nb_strata
         nx.set_edge_attributes(self.graph, values=stratum_index, name='stratum')
-        self.strata_tau = [1.0 if mode in ['nucleus', 'size'] else 0.0]
+        self.strata_tau = [1.0]
         self.strata_connected_to_input = [True]
         self.strata_raw_size = [self.graph.get_size()]
         self.strata_rel_size = [1.0]
@@ -716,81 +692,18 @@ class LLM_STRACE:
                 'subgraph': [],
                 'output connected': []
             }
-
-        if mode=='threshold':
-            threshold_values.sort() # sort from low to high
-        elif mode=='size':
-            threshold_values.sort() # sort from low to high
-        elif mode=='nucleus':
-            threshold_values.sort(reverse=True) # sort from high to low
-
-
-        if mode=='size':
-            stratum_sizes, is_connected_list, time_stats = self.label_graph_with_strata_sizes(sigmas=threshold_values)
-            self.strata_tau = threshold_values + self.strata_tau
-            self.strata_connected_to_input = is_connected_list + self.strata_connected_to_input
-            # update size
-            self.strata_raw_size = stratum_sizes + self.strata_raw_size
-            self.strata_rel_size = [s/self.strata_raw_size[-1] for s in stratum_sizes] + self.strata_rel_size
-            # update strata index
-            self.strata_index = list(range(len(threshold_values))) + self.strata_index
-        else:
-            try:
-                pbar = tqdm(threshold_values, desc=f"[STRACE] Extracting strata | tau={threshold_values[0]:.6g}")
-                iterator = pbar
-            except Exception:
-                pbar = None
-                iterator = threshold_values
-
-            initial_graph = self.graph # start with the full graph
-
-            for threshold in iterator:
-                stratum_index = stratum_index - 1 # decrease the index
-
-                if self.track_time:
-                    start_time = time.time()
-
-                # update progress bar description per-iteration (tqdm will advance automatically when used as the iterator)
-                if pbar is not None:
-                    pbar.set_description(f"[STRACE] Extracting strata | tau={threshold:.6g}")
-
-                # Extract subgraph containing edges above threshold
-                subgraph, connected_to_input, time_stats = self.label_graph_with_stratum(initial_graph, threshold, stratum_index, mode)
-                initial_graph = subgraph # update the initial graph to save time on the next iteration (the initial graph will be smaller)
-                # Store both subgraph and its threshold
-                self.strata_tau = [threshold] + self.strata_tau
-                self.strata_connected_to_input = [connected_to_input] + self.strata_connected_to_input
-                # update size
-                self.strata_raw_size = [subgraph.get_size()] + self.strata_raw_size
-                self.strata_rel_size = [float(self.strata_raw_size[0])/self.strata_raw_size[-1]] + self.strata_rel_size
-                # update strata index
-                self.strata_index = [stratum_index] + self.strata_index
-
-                if self.track_time:
-                    end_time = time.time()
-                    # Store timing info for later statistics
-                    extraction_times.append(end_time - start_time)
-                    for key in time_stats:
-                        accu_time_stats[key].append(time_stats[key])
-
-            # ensure progress bar is closed if used
-            if pbar is not None:
-                try:
-                    pbar.close()
-                except Exception:
-                    pass
-
-            if self.track_time:
-                avg_time = sum(extraction_times) / len(extraction_times)
-                max_time = max(extraction_times)
-                min_time = min(extraction_times)
-                print(f"[STRACE] Stratum extraction timing stats (seconds):")
-                print(f"[STRACE] Average: {avg_time:.3f}, Max: {max_time:.3f}, Min: {min_time:.3f}")
-                filtering_avg = sum(accu_time_stats['filtering']) / len(accu_time_stats['filtering'])
-                subgraph_avg = sum(accu_time_stats['subgraph']) / len(accu_time_stats['subgraph'])
-                output_avg = sum(accu_time_stats['output connected']) / len(accu_time_stats['output connected'])
-                print(f"[STRACE] Filtering: {filtering_avg:.3f}, Subgraph: {subgraph_avg:.3f}, Output: {output_avg:.3f} (all average)")
-
+    
+        threshold_values.sort() # sort from low to high
+    
+        stratum_sizes, is_connected_list, time_stats = self.label_graph_with_strata_sizes(sigmas=threshold_values)
+        self.strata_tau = threshold_values + self.strata_tau
+        self.strata_connected_to_input = is_connected_list + self.strata_connected_to_input
+        # update size
+        self.strata_raw_size = stratum_sizes + self.strata_raw_size
+        self.strata_rel_size = [s/self.strata_raw_size[-1] for s in stratum_sizes] + self.strata_rel_size
+        # update strata index
+        self.strata_index = list(range(len(threshold_values))) + self.strata_index
+        
 
     def auto_extract_strace(self, nb_stratum: int, log_tau: bool, mode: str):
         """
