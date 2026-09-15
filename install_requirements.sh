@@ -47,3 +47,13 @@ python main.py --model_name Qwen/Qwen3-0.6B-Base
 # 79.999% (8.0e-01)   0.0002              0.0000              Refinement Phase      
 # 100.000% (1.0e+00)  0.0000              0.0000              Refinement Phase      
 # ----------------------------------------------------------------------------------
+
+# 5. Test each test separatly
+
+mkdir results
+mkdir results/intermediate_graphs
+
+# 5.a Extraction
+# for a matter of efficiency, we decompose the dataset into chunk (that way, you can easily process the dataset in parallel jobs). 
+# You need to specify the index of the chunk, its size, and the total number of sentences in the dataset.
+python 1_extraction_gpu_2.py --model_name Qwen/Qwen3-0.6B-Base --chunk_id 0 --chunk_size 10 --total_sentences 5000 --data_file data/wikitext_40.txt --intermediate_dir results/intermediate_graphs --importance norm --checkpoint main 

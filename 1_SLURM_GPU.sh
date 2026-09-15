@@ -55,7 +55,7 @@ if [ "$CPU_OFFLOAD" = "1" ]; then
 fi
 
 # Run the GPU-bound Python script
-python 1_extraction_gpu_2.py "${CMD_ARGS[@]}"
+python 1_extraction_gpu.py "${CMD_ARGS[@]}"
 
 echo "--- Finished GPU Job Chunk $SLURM_ARRAY_TASK_ID ---"
 date
