@@ -13,7 +13,6 @@ This script is designed for local testing and debugging. It:
 from src.llm_trace.llm_trace_2 import LLM_STRACE
 from src.modified_transformers.utils import get_model_class, identify_model_type
 from transformers import AutoTokenizer
-from src.llm_trace.llm_trace_2 import THRESHOLD_STRACE
 from accelerate import cpu_offload
 
 import time
@@ -100,29 +99,14 @@ def main(model_name):
 
     batch_size = 1
     
-    # threshold_values: A manually defined list of 'tau' values.
-    # The script will extract one stratum for each value in this list.
-    # Values represent the cumulative probability mass for 'nucleus' mode,
-    # or the raw weight cutoff for 'threshold' mode.
-    # threshold_values = [
-    #     1.0, .9995, .999, .995, .99, .985, .98, .975, .97, .96, .95,
-    #     .9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1
-    # ]
-    # threshold_values = [
-    #     -1.0, 1e-7, 1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.4, 0.8, 1.0
-    # ]
-
-    if strace_mode == 'size':
-        threshold_values = [
-            1e-5,
-            1e-4, 2e-4, 4e-4, 8e-4,
-            1e-3, 1.2e-3, 1.4e-3, 2e-3, 3e-3, 4e-3, 6e-3, 8e-3,
-            1e-2, 2e-2, 4e-2, 6e-2, 8e-2,
-            1e-1, 2e-1, 4e-1, 6e-1, 8e-1
-        ]
-    else:
-        threshold_values = THRESHOLD_STRACE['_'.join([importance_mode, strace_mode])]
-    FREEZE = None #'mlp'
+    # Target sizes
+    threshold_values = [
+        1e-5,
+        1e-4, 2e-4, 4e-4, 8e-4,
+        1e-3, 1.2e-3, 1.4e-3, 2e-3, 3e-3, 4e-3, 6e-3, 8e-3,
+        1e-2, 2e-2, 4e-2, 6e-2, 8e-2,
+        1e-1, 2e-1, 4e-1, 6e-1, 8e-1
+    ]
 
     CPU_OFFLOAD = False
 

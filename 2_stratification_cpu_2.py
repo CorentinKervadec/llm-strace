@@ -1,7 +1,7 @@
 import argparse
 import os
 import time
-from src.llm_trace.llm_trace_2 import load_from_file_light, THRESHOLD_STRACE
+from src.llm_trace.llm_trace_2 import load_from_file_light
 
 def main():
     parser = argparse.ArgumentParser(description="Stage 2: CPU Stratum Analysis")
