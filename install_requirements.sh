@@ -63,3 +63,7 @@ python 1_extraction_gpu.py --model_name Qwen/Qwen3-0.6B-Base --chunk_id 0 --chun
 # The grid size is hard coded in the script
 mkdir results/intermediate_straces
 python 2_stratification_cpu.py --chunk_id 0 --chunk_size 10 --total_sentences 5000 --intermediate_dir results/intermediate_graphs --strace_dir results/intermediate_straces  --importance norm
+
+# 5.c Evaluation
+mkdir results/final_straces
+python 3_evaluation_gpu.py --model_name Qwen/Qwen3-0.6B-Base --chunk_id 0 --chunk_size 10 --total_sentences 5000 --final_dir results/final_straces --strace_dir results/intermediate_straces

@@ -51,7 +51,7 @@ if [ "$CPU_OFFLOAD" = "1" ]; then
 fi
 
 # Run the Stage 3 GPU-bound Python script
-python 3_evaluate_gpu_2.py "${CMD_ARGS[@]}"
+python 3_evaluate_gpu.py "${CMD_ARGS[@]}"
 # python 3_patch_nucleus_tokens.py "${CMD_ARGS[@]}"
 # python 3_extract_last_hidden.py "${CMD_ARGS[@]}"
 
