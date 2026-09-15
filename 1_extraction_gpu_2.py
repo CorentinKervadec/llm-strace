@@ -133,7 +133,7 @@ def main():
         
         # 2. Populate the graph
         start_time = time.time()
-        strace.populate_graph(batch_size, importance_mode)
+        strace.populate_graph(importance_mode)
         print(f"[GPU-JOB {sentence_index}] Time to populate graph: {time.time() - start_time:.2f} s")
 
         # --- Save Intermediate State ---
