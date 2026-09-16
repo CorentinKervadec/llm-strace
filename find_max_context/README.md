@@ -6,9 +6,9 @@ This utility automates the search for the maximum sequence length (context windo
 
 ## Overview & Purpose
 
-When extracting computational subgraphs (s-traces) or performing fine-grained model attribution, different architectures and parameter sizes (e.g., Qwen, Mistral, OLMo, Gemma) require vastly different amounts of VRAM per context length token. 
+When extracting computational subgraphs (s-traces) or performing fine-grained model attribution, different architectures and parameter sizes (e.g., Qwen, Mistral, OLMo, Gemma) require vastly different amounts of VRAM per context length token. In particular, the operations required to extract and evaluate the trace require more memory than a simple forward pass. You can use this script to estimate which context size you can run on your hardware.
 
-Instead of manually benchmarking context limits for every model individually, `find_max_context_launcher.sh` automates this process by launching background manager tasks (`find_max_context_manager.py`) in parallel across a pre-configured list of models.
+Instead of manually benchmarking context limits for every model individually, `find_max_context_launcher.sh` automates this process by launching background manager tasks (`find_max_context_manager.py`) in parallel across a pre-configured list of models. It is currently based on SLURM, but you can easily adapt it to your need.
 
 ---
 
