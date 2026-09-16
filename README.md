@@ -16,6 +16,19 @@ pip install -r requirements.txt
 
 The extraction and evaluation of `s-Trace` is divided into three stages:
 
+### Parallel Chunking Parameters
+
+For efficiency and parallel cluster execution (e.g., Slurm array jobs), the target dataset is divided into manageable chunks across all three pipeline scripts using three parameters:
+```
+    --chunk_id: The 0-indexed identifier for the specific chunk/job being processed.
+
+    --chunk_size: The number of sentences or dataset entries assigned to each chunk.
+
+    --total_sentences: The total number of sentences contained in the target dataset.
+```
+
+In what follows, we use the small LLM `Qwen/Qwen3-0.6B-Base` to process the first 10 instances of the `wikitext_40.txt`, as an example.
+
 ### Stage 1: Graph Population (GPU)
 Populates the complete computation graph with edge importance scores.
 ```bash
@@ -26,7 +39,6 @@ python 1_extraction_gpu.py \
     --total_sentences 5000 \
     --data_file data/wikitext_40.txt \
     --intermediate_dir results/intermediate_graphs \
-    --checkpoint main
 ```
 
 ### Stage 2: s-Trace Extraction (CPU)
@@ -50,12 +62,15 @@ python 3_evaluate_gpu.py \
     --total_sentences 5000 \
     --strace_dir results/intermediate_straces \
     --final_dir results/final_straces \
-    --checkpoint main
 ```
 
 ## Large Scale Execution
 
-For running across a compute cluster, you can use the provided Slurm master script:
+For running across a compute cluster, you can use the provided Slurm master script. Note: this script is provided as an example, you will need to adapt it to your specific computation infrastructure.
 ```bash
 ./MASTER_SLURM_DATASET.sh <partition> <CPU_OFFLOAD> <model_name> <checkpoint> <importance> <strace> <dataset_name> <split> <nb_data> <chunk_size>
 ```
+
+### Note on Hardware & Context Windows: 
+
+VRAM consumption varies across model architectures and sequence lengths. You can run the benchmarking launcher in find_max_context/ (find_max_context_launcher.sh) to determine the exact model parameter sizes and maximum context lengths supported by your GPU hardware without incurring Out-Of-Memory (OOM) errors.  
