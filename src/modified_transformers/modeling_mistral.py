@@ -27,7 +27,7 @@ from transformers.utils import TransformersKwargs, can_return_tuple
 from transformers.models.mistral.configuration_mistral import MistralConfig
 
 # === MODIFICATION START: Custom Imports for Mechanistic Interpretability ===
-from src.llm_graph.llm_graph_nx_light import LLM_Graph_NX
+from src.llm_graph.llm_graph_nx import LLM_Graph_NX
 from src.utils.utils import get_real_weight_from_offloaded_module, linearize_rms_norm, apply_linearized_norm
 from src.test.unit_tests import test_reconstruction, CausalLeakageError
 # === MODIFICATION END ===
