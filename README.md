@@ -67,7 +67,6 @@ python 3_evaluate_gpu.py \
 ### Section 4.4: Hidden Representation Extraction (GPU)
 
 Extracts last-token hidden representations across trace sizes and baseline conditions (random/inverse subgraphs) to reproduce the representation geometry and alignment analysis presented in **Section 4.4** and **Figure 5** of the paper.
-
 ```bash
 python 3_extract_last_hidden.py \
     --model_name Qwen/Qwen3-0.6B-Base \
@@ -75,6 +74,7 @@ python 3_extract_last_hidden.py \
     --chunk_size 10 \
     --total_sentences 5000 \
     --final_dir results/final_straces
+```
 
 ## Large Scale Execution
 
