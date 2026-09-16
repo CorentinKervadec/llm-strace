@@ -19,7 +19,7 @@ import torch
 from transformers import AutoTokenizer
 from accelerate import cpu_offload
 
-from src.llm_trace.llm_trace_2 import load_from_file_light
+from src.llm_trace.llm_trace import load_from_file_light
 from src.modified_transformers.utils import get_model_class, identify_model_type
 
 

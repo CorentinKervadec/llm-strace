@@ -10,7 +10,7 @@ This script is designed for local testing and debugging. It:
 """
 
 # Import the main orchestration class
-from src.llm_trace.llm_trace_2 import LLM_STRACE
+from src.llm_trace.llm_trace import LLM_STRACE
 from src.llm_trace.log_utils import SuppressUnitTestLogs
 from src.modified_transformers.utils import get_model_class, identify_model_type
 from transformers import AutoTokenizer

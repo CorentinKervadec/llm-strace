@@ -16,7 +16,7 @@ For a given chunk of pre-populated graphs, this script:
 import argparse
 import os
 import time
-from src.llm_trace.llm_trace_2 import load_from_file_light
+from src.llm_trace.llm_trace import load_from_file_light
 
 def main():
     parser = argparse.ArgumentParser(description="s-Trace Stage 2: CPU Strata Extraction")

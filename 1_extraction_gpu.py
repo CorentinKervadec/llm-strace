@@ -18,7 +18,7 @@ import torch
 from transformers import AutoTokenizer
 from accelerate import cpu_offload
 
-from src.llm_trace.llm_trace_2 import LLM_STRACE
+from src.llm_trace.llm_trace import LLM_STRACE
 from src.modified_transformers.utils import get_model_class, identify_model_type
 
 def load_sentence(data_file: str, index: int) -> dict:
