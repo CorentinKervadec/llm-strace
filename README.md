@@ -12,8 +12,6 @@ conda activate llm-trace
 pip install -r requirements.txt
 ```
 
-*(Alternatively, you can run `bash install_requirements.sh` which sets up the environment and runs a small end-to-end test.)*
-
 ## Usage
 
 The extraction and evaluation of `s-Trace` is divided into three stages:
