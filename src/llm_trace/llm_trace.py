@@ -52,15 +52,6 @@ def surprisal(logits, labels):
     return loss, entropy, predicted_token_id, rank
 
 
-class MockTokenized:
-    def __init__(self, ids, mask):
-        self.input_ids = ids
-        self.attention_mask = mask
-
-    def copy(self):
-        return MockTokenized(self.input_ids.clone(), self.attention_mask.clone())
-
-
 def get_total_variation(original_logits, graph_logits):
     """
     Compute the total variation distance between the probability distributions
@@ -289,190 +280,6 @@ class LLM_STRACE:
             for (k,s) in stats.items():
                 print(f"[STRACE][GRAPH STATS] {k}: {s}")
     
-    def label_graph_with_stratum(self, initial_graph: LLM_Graph_NX, tau: float, stratum_index: int, mode: str):
-        """
-        Filters initial_graph to create a connected subgraph and labels
-        the corresponding edges on `self.graph` with the stratum_index.
-
-        The filtering method is determined by `mode`:
-        - 'threshold': (Original) Keeps edges where `weight > tau`.
-        - 'nucleus': (New) For each node, keeps the top-N incoming edges
-                    whose weights sum to the cumulative mass `tau`.
-        
-        'frozen' specifies if we want to focus on one type of component:
-        - 'attention': only the attention head can be keep/pruned (e.g. mlp are always included in the graph)
-        - 'mlp': only the mlps can be keep/pruned (e.g. attention heads are always included in the graph)
-        - 'none': all components can be keep/pruned
-    
-        Returns a connected subgraph of initial graph.
-        """
-
-        # Get the output node
-        output_node = initial_graph.get_output_node()
-
-        time_stats = {
-            'filtering': None,
-            'subgraph': None,
-            'output connected': None
-        }
-
-        if self.track_time:
-            start_time = time.time()
-
-        def condition(datum):
-            if self.frozen == None:
-                return datum.get('weight') > tau
-            else:
-                if datum.get('name').startswith(self.frozen):
-                    return True # component specified in 'keep' is always included in the strace
-                else:
-                    return datum.get('weight') > tau
-
-        if mode == 'threshold':
-            # Original mode: Filter by a minimum weight threshold
-            edges_to_keep = [
-                (u, v, k)
-                for u, v, k, d in initial_graph.edges(keys=True, data=True)
-                if condition(d)
-            ]
-            # print(f"[{tau}] Nb edges to keep:", len(edges_to_keep))
-
-        elif mode == 'nucleus':
-
-            if keep != 'none':
-                raise NotImplementedError
-
-            # --- NUCLEUS MODE (Optimized) ---
-            # Start from the output and traverse backwards, applying
-            # nucleus filtering as we go. This combines filtering and
-            # connectivity checking in one efficient pass.
-            
-            edges_to_keep = set()
-            # Use a deque for an efficient BFS-style queue
-            nodes_to_process = collections.deque([output_node])
-            nodes_processed = {output_node} # Keep track of visited nodes to avoid cycles/redundancy
-
-            while nodes_to_process:
-                current_node = nodes_to_process.popleft()
-                
-                # --- Caching Optimization ---
-                # Check if we have already computed and sorted the in-edges for this node
-                sorted_in_edges = initial_graph.nodes[current_node].get('_cached_sorted_in_edges')
-
-                if sorted_in_edges is None:
-                    # --- Cache Miss: Compute, Sort, and Store ---
-                    # Get all incoming edges for the current node
-                    in_edges = initial_graph.in_edges(current_node, data=True, keys=True)
-                    
-                    # Store as (weight, edge_key) for sorting
-                    weighted_edges = []
-                    for u, v, k, data in in_edges:
-                        weight = data.get('weight', 0)
-                        if weight > 0: # Only consider edges with positive weight
-                            weighted_edges.append((weight, (u, v, k)))
-                    
-                    if not weighted_edges:
-                        # Cache the empty list to avoid re-computing
-                        initial_graph.nodes[current_node]['_cached_sorted_in_edges'] = []
-                        continue
-                    
-                    # Sort by weight, descending
-                    weighted_edges.sort(key=lambda x: x[0], reverse=True)
-                    
-                    # Store in cache
-                    initial_graph.nodes[current_node]['_cached_sorted_in_edges'] = weighted_edges
-                    sorted_in_edges = weighted_edges
-                    # print(f"Cache MISS for node {current_node}") # For debugging
-                # else:
-                    # print(f"Cache HIT for node {current_node}") # For debugging
-
-                # --- Use the (now populated) cache ---
-                if not sorted_in_edges:
-                    continue # Nothing to process (from cache or new)
-                
-                # Add edges until we reach the cumulative 'tau' mass
-                cumulative_weight = 0.0
-                for weight, edge_key in sorted_in_edges:
-                    # Add edge *first*, then check cumulative weight.
-                    # This ensures at least one edge is added (if any exist).
-                    if cumulative_weight < tau:
-                        edges_to_keep.add(edge_key)
-                        cumulative_weight += weight
-                        
-                        # Get the source node of this edge
-                        source_node = edge_key[0] 
-                        
-                        # If we haven't processed this ancestor, add it to the queue
-                        if source_node not in nodes_processed:
-                            nodes_processed.add(source_node)
-                            nodes_to_process.append(source_node)
-                    else:
-                        break # Stop as soon as we've crossed the threshold  
-        else:
-            raise ValueError(f"Unknown mode '{mode}'. Must be 'threshold' or 'nucleus'.")
-
-        if self.track_time:
-            time_stats['filtering'] = time.time() - start_time
-
-        if self.track_time:
-            start_time = time.time()
-        # Create initial subgraph with filtered edges
-        initial_subgraph = initial_graph.edge_subgraph(edges_to_keep)
-        # note: initial_subgraph is the same tyme as full_graph
-        if self.track_time:
-            time_stats['subgraph'] = time.time() - start_time
-        
-
-        if self.track_time:
-            start_time = time.time()
-        # Get all nodes that have a path to the output node (including the output node)
-        if output_node not in initial_subgraph:
-            initial_subgraph = initial_graph.subgraph([output_node])
-            print("The filtered graph does not include the output node. The threshold might be too high.")
-
-        # FIX 4: Output explicit warning if isolation occurs
-        if output_node not in initial_subgraph:
-            print(f"[WARNING] Output node lost all incoming connections! Deleting {len(edges_to_keep)} valid upstream edges.")
-            initial_subgraph = initial_graph.subgraph([output_node])
-
-        # Faster than nx.ancestor
-        # reverse_tree = nx.bfs_tree(initial_subgraph, output_node, reverse=True)
-        # connected_nodes = set(reverse_tree.nodes())
-        connected_nodes = {output_node} | nx.ancestors(initial_subgraph, output_node)
-
-        # Create the final subgraph containing only connected nodes
-        # note: subgraph is the same tyme as full_graph
-        subgraph = initial_subgraph.subgraph(connected_nodes).copy()
-        if self.track_time:
-            time_stats['output connected'] = time.time() - start_time
-                
-        subgraph.set_output_node(output_node)
-
-        # Add input nodes to the LLM subgraph
-        subgraph.clear_input_nodes() # it is important to clear it because it already contains the input nodes of the full graph
-        for input_node in initial_graph.get_input_nodes():
-            if input_node in subgraph:
-                subgraph.add_input_node(input_node)
-
-        # Check that the LLM subgraph contains at least one input node
-        connected_to_input = True
-        if len(subgraph.get_input_nodes()) == 0:
-            connected_to_input = False
-            # print("[STRACE] The subgraph does not contain input nodes. This might indicate a bug.")
-        
-        # go back to the full graph and label the edges that belongs to the stratum
-        # Create a dictionary of all edges in the final subgraph
-        # The key is the (u, v, k) tuple, the value is the stratum index
-        edges_to_label = {
-            (u, v, k): stratum_index 
-            for u, v, k in subgraph.edges(keys=True)
-        }
-        # Apply all attributes to self.graph in one efficient operation
-        nx.set_edge_attributes(self.graph, values=edges_to_label, name='stratum')
-
-        
-        return subgraph, connected_to_input, time_stats
-
     def label_graph_with_strata_sizes(self, sigmas: list[float]):
         """
         Filters self.graph to create a connected subgraph and labels
@@ -628,48 +435,6 @@ class LLM_STRACE:
         # update strata index
         self.strata_index = list(range(len(threshold_values))) + self.strata_index
         
-
-    def auto_extract_strace(self, nb_stratum: int, log_tau: bool, mode: str):
-        """
-        Automatically extracts stratified traces by finding appropriate thresholds.
-        Args:
-            nb_stratum: Number of strata to extract between min and max edge weights
-            log_tau: If True, thresholds increase logarithmically (evenly spaced in log-space)
-        """
-        if mode=='threshold':
-            # Get all edge weights from the full graph
-            output_node = self.graph.get_output_node()
-            all_edge_weights = [d['weight'] for _, _, _, d in self.graph.edges(keys=True, data=True)]
-            output_edge_weights = [d['weight'] for _, _, _, d in self.graph.in_edges(nbunch=[output_node], keys=True, data=True)]
-
-            max_weight = max(output_edge_weights)  # Empty stratum above this, because we start from the output node
-            min_weight = min(all_edge_weights)  # Full graph below this
-        elif mode=='nucleus':
-            min_weight = 0.01
-            max_weight = 0.999 
-        else:
-            raise ValueError(f"Unknown mode '{mode}'. Must be 'threshold' or 'nucleus'.")
-        
-        # Compute thresholds either linearly or logarithmically
-        if log_tau:
-            if mode=='threshold':
-                log_min = math.log(min_weight+EPS)
-                log_max = math.log(max_weight)
-                step = (log_max - log_min) / nb_stratum
-                threshold_values = [math.exp(log_min + (i * step)) for i in range(nb_stratum)]
-            if mode=='nucleus': # should be inv log
-                exp_min = math.exp(min_weight)
-                exp_max = math.exp(max_weight)
-                step = (exp_max - exp_min) / nb_stratum
-                threshold_values = [math.log(exp_min + (i * step)) for i in range(nb_stratum)]
-        else:
-            # Linear spacing
-            weight_range = max_weight - min_weight
-            step = weight_range / nb_stratum
-            threshold_values = [min_weight + (i * step) for i in range(nb_stratum)]
-                   
-        # Extract strata using calculated thresholds
-        self.extract_strace(threshold_values, mode)
 
     def print_graph_sizes_and_thresholds(self):
         """
@@ -832,19 +597,6 @@ class LLM_STRACE:
             print(f"{size_str:<20}{tv_t_str:<20}{tv_r_str:<20}{phase_str:<22}")
 
         print(separator + "\n")
-
-    def print_graph_sizes_and_thresholds_short(self):
-        """
-        Prints the size of each stratum alongside its corresponding threshold value.
-        """
-        print(f"[STRACE] Displaying threshold and graph size:\n{'S':<5}{'c-input?':<10}{'Threshold':<25}{'Size (rel)':<15}{'Size (raw)':<15}{'TV':<15}{'Nucleus':<15}{'N60 (top 5)':<25}")
-        print("-" * 9 * 25)
-        for stratum, threshold, rel_size, raw_size, c_in, tv, nu, n60 in zip(
-            self.strata_index, self.strata_tau, self.strata_rel_size, self.strata_raw_size, self.strata_connected_to_input, 
-            self.strata_reco_tv['trace']['only'], self.strata_reco_nu['trace']['only'], self.strata_nucleus_60['trace']['only']):
-            top5_nucleus_str = repr('|'.join(n60[:5]))
-            c_in_str = 'yes' if c_in else 'no'
-            print(f"{stratum:<5}{c_in_str:<10}{threshold:<25.3e}{rel_size:<15.0%}{raw_size:<15.2e}{tv:<15.2e}{nu:<15}{top5_nucleus_str:<25}")
 
     def compute_stratum_reconstruction_error(self, do_random=False, do_inverse=False, save_logit=False):
         for i, stratum_index in tqdm(enumerate(self.strata_index), desc=f"[STRACE] Evaluating strata"):

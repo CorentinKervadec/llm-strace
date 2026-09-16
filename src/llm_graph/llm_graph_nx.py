@@ -144,12 +144,6 @@ class LLM_Graph_NX(nx.MultiDiGraph):
     def get_n_tokens(self):
         return self.graph['n_tokens']
 
-    def get_graph_n_layers(self):
-        if self.architecture_type == 'sequential':
-            return 2 * self.graph['n_layers']
-        else:
-            raise NotImplementedError("Subclasses should implement this method.")
-
     def get_size(self):
         """
         Counts all edges in the graph
@@ -218,11 +212,6 @@ class LLM_Graph_NX(nx.MultiDiGraph):
         if node_index not in self.nodes:
             raise ValueError(f"Node {node_index} does not exist in the graph.")
         self.graph['input_node_index'].append(node_index)
-
-    def update_edge_importance(self):
-        #1) compute importance with batching
-        #2) update edge importance accordingly
-        raise NotImplementedError("Subclasses should implement this method.")
 
     def add_new_last_token(self, new_last_token_id):
         self.model_input.input_ids = torch.concat([self.model_input.input_ids, new_last_token_id], dim=-1)
@@ -713,27 +702,4 @@ def load_from_dict(data_to_load: dict):
     else:
          new_llm_graph.model_input = None
  
-    return new_llm_graph
-
-
-def load_from_file(file_path: str):
-    """
-    Loads graph data from a pickle file and reconstructs
-    the LLM_Graph_NX object.
-        """
-    if not os.path.exists(file_path):
-        print(f"[LLM_Graph_NX] Error: File not found at {file_path}")
-        return None
-
-    # 1. Load the dictionary from pickle
-    try:
-        with open(file_path, 'rb') as f:
-            data_to_load = pickle.load(f)
-    except Exception as e:
-        print(f"[LLM_Graph_NX] Error loading pickle file: {e}")
-        return None
-
-    new_llm_graph = load_from_dict(data_to_load)
-    
-    print(f"[LLM_Graph_NX] Successfully loaded from {file_path}")
     return new_llm_graph
