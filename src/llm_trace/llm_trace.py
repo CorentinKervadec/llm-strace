@@ -1,4 +1,4 @@
-from src.llm_graph.llm_graph_nx_light import LLM_Graph_NX, load_from_dict
+from src.llm_graph.llm_graph_nx import LLM_Graph_NX, load_from_dict
 from src.llm_trace.mask_utils import prepare_mask
 from transformers.modeling_utils import PreTrainedModel
 import networkx as nx
