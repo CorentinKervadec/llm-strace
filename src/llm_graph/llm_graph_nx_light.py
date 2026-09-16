@@ -2,7 +2,7 @@ import torch
 import networkx as nx
 from typing import Optional, Tuple
 from tqdm import tqdm
-import src.llm_hooked.sanity_checks as sanity_checks
+import src.utils.sanity_checks as sanity_checks
 import random
 import numpy as np
 import math

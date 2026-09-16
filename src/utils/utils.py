@@ -55,39 +55,6 @@ def apply_linearized_norm(input_tensor, inv_std, weight):
     normalized_fp32 = input_tensor.to(inv_std.device).to(torch.float32) * inv_std.to(torch.float32)
     return (weight * normalized_fp32).to(input_dtype)
 
-# def linearize_rms_norm(rms_norm, input_tensor: torch.Tensor):
-#     """
-#     Linearizes a RMS norm operation for a specific input tensor.
-
-#     Args:
-#         rms_norm: The RMS norm module to linearize.
-#         input_tensor (torch.Tensor): The input tensor to the LayerNorm.
-
-#     Returns:
-#         - L (torch.Tensor): The equivalent affine transformation matrix.
-#     """
-
-#     assert input_tensor.dtype == rms_norm.weight.dtype, "Input tensor and LayerNorm weight must have the same dtype"
-    
-#     d_seq = input_tensor.shape[-2]  # Sequence length
-#     d = input_tensor.shape[-1]      # Hidden size
-
-#     eps = rms_norm.variance_epsilon 
-
-#     # Compute standard deviation from input
-#     var = torch.mean(input_tensor.pow(2), dim=-1) #
-#     # var = torch.var(input_tensor, dim=-1, unbiased=False)
-#     inv_std = torch.rsqrt(var + eps).to(input_tensor.dtype)
-#     # Extract gamma (weight) RMSNorm
-#     weight = get_real_weight_from_offloaded_module(rms_norm)
-#     inv_std = inv_std
-
-#     weight = weight.to(inv_std.device)
-#     # Compute the affine transformation matrix L
-#     L = torch.einsum("s,d->sd" ,inv_std, weight)
-
-#     return L
-
 """
 Functions copy/pasted from HF's transformers that are used in LLM_Hooked.
 I put them here because they are shared accross some LLMs.
