@@ -86,3 +86,15 @@ For running across a compute cluster, you can use the provided Slurm master scri
 ### Note on Hardware & Context Windows: 
 
 VRAM consumption varies across model architectures and sequence lengths. You can run the benchmarking launcher in find_max_context/ (find_max_context_launcher.sh) to determine the exact model parameter sizes and maximum context lengths supported by your GPU hardware without incurring Out-Of-Memory (OOM) errors.  
+
+## Citation
+
+If you use this code, please cite:
+```
+@article{kervadec2026tracing,
+  title={Tracing Computation Density in LLMs},
+  author={Kervadec, Corentin and Lysova, Iuliia and Macocco, Iuri and Baroni, Marco and Boleda, Gemma},
+  journal={Proceedings of the 2026 Conference on Empirical Methods in Natural Language Processing (EMNLP)},
+  year={2026}
+}
+```
