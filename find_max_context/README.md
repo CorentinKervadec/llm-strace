@@ -61,13 +61,3 @@ Upon execution, the script will:
   ```bash
   tail -f context_logs/mistralai_Mistral-7B-v0.1_manager.log
   ```
-
-- **Check Active Processes**:
-  ```bash
-  ps -ef | grep find_max_context_manager
-  ```
-
-- **Terminate Running Managers** (if needed):
-  ```bash
-  pkill -f find_max_context_manager.py
-  ```
