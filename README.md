@@ -38,7 +38,7 @@ python 1_extraction_gpu.py \
     --chunk_size 10 \
     --total_sentences 5000 \
     --data_file data/wikitext_40.txt \
-    --intermediate_dir results/intermediate_graphs \
+    --intermediate_dir results/intermediate_graphs
 ```
 
 ### Stage 2: s-Trace Extraction (CPU)
@@ -61,8 +61,20 @@ python 3_evaluate_gpu.py \
     --chunk_size 10 \
     --total_sentences 5000 \
     --strace_dir results/intermediate_straces \
-    --final_dir results/final_straces \
+    --final_dir results/final_straces
 ```
+
+### Section 4.4: Hidden Representation Extraction (GPU)
+
+Extracts last-token hidden representations across trace sizes and baseline conditions (random/inverse subgraphs) to reproduce the representation geometry and alignment analysis presented in **Section 4.4** and **Figure 5** of the paper.
+
+```bash
+python 3_extract_last_hidden.py \
+    --model_name Qwen/Qwen3-0.6B-Base \
+    --chunk_id 0 \
+    --chunk_size 10 \
+    --total_sentences 5000 \
+    --final_dir results/final_straces
 
 ## Large Scale Execution
 
