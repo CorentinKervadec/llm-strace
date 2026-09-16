@@ -1,6 +1,6 @@
 # 🌌 llm-strace: Tracing Computation Density in LLMs
 
-This repository contains the code for the EMNLP paper **"Tracing Computation Density in LLMs"**. The `s-Trace` method efficiently estimates a subgraph of size $s$ that approximates a full model output, uncovering the "construction" and "refinement" phases of language model computation.
+This repository contains the code for the [EMNLP paper **"Tracing Computation Density in LLMs"**](https://arxiv.org/abs/2605.27033). The `s-Trace` method efficiently estimates a subgraph of size $s$ that approximates a full model output, uncovering the "construction" and "refinement" phases of language model computation.
 
 ## Setup
 
