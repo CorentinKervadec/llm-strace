@@ -10,12 +10,6 @@ When extracting computational subgraphs (s-traces) or performing fine-grained mo
 
 Instead of manually benchmarking context limits for every model individually, `find_max_context_launcher.sh` automates this process by launching background manager tasks (`find_max_context_manager.py`) in parallel across a pre-configured list of models.
 
-### Key Benefits
-
-- **Background Execution (`nohup`)**: Runs process managers persistently in the background, allowing context discovery to continue uninterrupted even if your SSH session or terminal disconnects.
-- **Isolated Logging**: Directs standard output (`stdout`) and error logs (`stderr`) for each model into dedicated log files within the `context_logs/` directory.
-- **Staggered Process Launch**: Introduces a short sleep interval between model manager initializations to prevent resource contention on job schedulers or system threads.
-
 ---
 
 ## Pre-Configured Model Matrix
@@ -41,3 +35,39 @@ Ensure the launcher shell script has execution permissions:
 
 ```bash
 chmod +x find_max_context_launcher.sh
+```
+
+### 2. Launch Context Optimization Managers
+
+Execute the launcher script:
+
+```bash
+./find_max_context_launcher.sh
+```
+
+Upon execution, the script will:
+1. Automatically create the `context_logs/` output directory if it does not already exist.
+2. Iterate through the array of target models.
+3. Spawn `find_max_context_manager.py` in the background for each model with appropriate logging redirection.
+
+### 3. Monitoring & Management
+
+- **Track Progress Real-Time**:
+  ```bash
+  tail -f context_logs/*.log
+  ```
+
+- **View Specific Model Logs**:
+  ```bash
+  tail -f context_logs/mistralai_Mistral-7B-v0.1_manager.log
+  ```
+
+- **Check Active Processes**:
+  ```bash
+  ps -ef | grep find_max_context_manager
+  ```
+
+- **Terminate Running Managers** (if needed):
+  ```bash
+  pkill -f find_max_context_manager.py
+  ```
