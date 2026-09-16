@@ -307,14 +307,6 @@ class LLM_STRACE:
         Returns a connected subgraph of initial graph.
         """
 
-        # # 1. Grab just ONE edge to see what it actually looks like at this exact moment
-        # sample_edge = next(iter(initial_graph.edges(data=True)))
-        # print(f"[DEBUG LABELER] Sample edge data: {sample_edge}")
-
-        # # 2. Check the raw max of the key you are about to threshold
-        # max_w = max(d.get('weight') for u, v, d in initial_graph.edges(data=True))
-        # print(f"[DEBUG LABELER] Max 'weight' found: {max_w}")
-
         # Get the output node
         output_node = initial_graph.get_output_node()
 

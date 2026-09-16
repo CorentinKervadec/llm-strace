@@ -29,19 +29,19 @@ def main():
     parser.add_argument('--chunk_id', type=int, required=True, help='Slurm array task ID (used as chunk index).')
     parser.add_argument('--chunk_size', type=int, required=True, help='Number of sentences to process per job.')
     parser.add_argument('--total_sentences', type=int, required=True, help='Total size of the dataset.')
-    parser.add_argument('--strace_dir', type=str, required=True, help='Directory containing Stage 2 extracted strata.')
+    parser.add_argument('--strace_dir', type=str, required=True, help='Directory containing Stage 2 extracted s-traces.')
     parser.add_argument('--final_dir', type=str, required=True, help='Directory to save final evaluation results.')
     parser.add_argument('--cpu_offload', action='store_true', help='Enable CPU offload for large models.')
+    parser.add_argument('--precision', type=str, choices=['float16', 'float32'], default='float16', help='Model precision.')
+    parser.add_argument('--cleanup', action='store_true', help='Delete intermediate s-trace files to save disk space.')
     parser.add_argument('--checkpoint', type=str, default='main')
     args = parser.parse_args()
-
-    half_precision = True
 
     # --- 1. Model Initialization ---
     print(f"[STAGE 3 | CHUNK {args.chunk_id}] Initializing model...")
     start_time = time.time()
 
-    target_dtype = torch.float16 if half_precision else torch.float32
+    target_dtype = torch.float16 if args.precision == 'float16' else torch.float32
     model_type = identify_model_type(args.model_name)
     hf_constructor = get_model_class(model_type)
 
@@ -88,12 +88,12 @@ def main():
             print(f"[STAGE 3 | IDX {sentence_index}] WARNING: No extracted strace file found at {strace_file}. Skipping.")
             continue
 
-        print(f"\n[STAGE 3 | IDX {sentence_index}] Loading strata from {strace_file}...")
+        print(f"\n[STAGE 3 | IDX {sentence_index}] Loading s-traces from {strace_file}...")
         strace = load_from_file_light(strace_file, llm, tokenizer)
         strace.reset_evaluation()
 
         # Run GPU-bound intervention passes to calculate reconstruction error
-        print("  > Computing stratum reconstruction error (TV distance & control baselines)...")
+        print("  > Computing s-trace reconstruction error (TV distance & control baselines)...")
         t_start = time.time()
         strace.compute_stratum_reconstruction_error(
             do_random=True,
@@ -109,7 +109,7 @@ def main():
         strace.save_light(final_file_path)
 
         # Clean up intermediate Stage 2 graph to free up disk space
-        if os.path.exists(strace_file):
+        if args.cleanup and os.path.exists(strace_file):
             os.remove(strace_file)
 
     print(f"\n[STAGE 3 | CHUNK {args.chunk_id}] Complete.")

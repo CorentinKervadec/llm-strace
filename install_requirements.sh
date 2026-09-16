@@ -56,13 +56,13 @@ mkdir results
 # for a matter of efficiency, we decompose the dataset into chunk (that way, you can easily process the dataset in parallel jobs). 
 # You need to specify the index of the chunk, its size, and the total number of sentences in the dataset.
 mkdir results/intermediate_graphs
-python 1_extraction_gpu.py --model_name Qwen/Qwen3-0.6B-Base --chunk_id 0 --chunk_size 10 --total_sentences 5000 --data_file data/wikitext_40.txt --intermediate_dir results/intermediate_graphs --importance norm --checkpoint main 
+python 1_extraction_gpu.py --model_name Qwen/Qwen3-0.6B-Base --chunk_id 0 --chunk_size 10 --total_sentences 5000 --data_file data/wikitext_40.txt --intermediate_dir results/intermediate_graphs --importance L1-norm --checkpoint main 
 
 # 5.b Stratification
-# decompose the computational graph previoulsy extracted into subgraph (or "strata") of various size, that progressively reconstruct the full graph.
+# decompose the computational graph previoulsy extracted into subgraph (or "s-Trace") of various size, that progressively reconstruct the full graph.
 # The grid size is hard coded in the script
 mkdir results/intermediate_straces
-python 2_stratification_cpu.py --chunk_id 0 --chunk_size 10 --total_sentences 5000 --intermediate_dir results/intermediate_graphs --strace_dir results/intermediate_straces  --importance norm
+python 2_stratification_cpu.py --chunk_id 0 --chunk_size 10 --total_sentences 5000 --intermediate_dir results/intermediate_graphs --strace_dir results/intermediate_straces  --importance L1-norm
 
 # 5.c Evaluation
 mkdir results/final_straces

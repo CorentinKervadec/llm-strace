@@ -1,5 +1,5 @@
 """
-Stage 2: Strata Extraction (CPU)
+Stage 2: s-Trace Extraction (CPU)
 ======================================
 This script represents the second stage of the s-Trace pipeline. 
 Because filtering edges and extracting computational subgraphs (s-traces) 
@@ -25,19 +25,15 @@ def main():
     parser.add_argument('--total_sentences', type=int, required=True, help='Total size of the dataset.')
     parser.add_argument('--intermediate_dir', type=str, required=True, help='Directory containing Stage 1 intermediate graphs.')
     parser.add_argument('--strace_dir', type=str, required=True, help='Directory to save extracted straces for Stage 3.')
-    parser.add_argument('--importance', type=str, required=True, help='Edge importance metric used during graph population.')
+    parser.add_argument('--importance', type=str, default='L1-norm', help='Edge importance metric used during graph population.')
+    parser.add_argument('--thresholds', type=float, nargs='+', default=[1e-5, 2e-5, 4e-5, 8e-5, 1e-4, 2e-4, 4e-4, 8e-4, 1e-3, 1.2e-3, 1.4e-3, 2e-3, 3e-3, 4e-3, 6e-3, 8e-3, 1e-2, 2e-2, 4e-2, 6e-2, 8e-2, 1e-1, 2e-1, 4e-1, 6e-1, 8e-1], help='Target sizes used to extract subgraphs.')
+    parser.add_argument('--cleanup', action='store_true', help='Delete intermediate graph files to save disk space.')
     parser.add_argument('--freeze', type=str, default=None, help='Optional component freezing ("attention" or "mlp").')
     args = parser.parse_args()
 
     # --- 1. Threshold Density Grid (tau) ---
     # Defines the target size used to extract subgraphs (1.0 == 100% of the model)
-    threshold_values = [
-        1e-5, 2e-5, 4e-5, 8e-5,
-        1e-4, 2e-4, 4e-4, 8e-4,
-        1e-3, 1.2e-3, 1.4e-3, 2e-3, 3e-3, 4e-3, 6e-3, 8e-3,
-        1e-2, 2e-2, 4e-2, 6e-2, 8e-2,
-        1e-1, 2e-1, 4e-1, 6e-1, 8e-1
-    ]
+    threshold_values = args.thresholds
 
     # --- 2. Calculate Data Chunk Bounds ---
     start_index = args.chunk_id * args.chunk_size
@@ -73,13 +69,13 @@ def main():
         # Run CPU-bound subgraph extraction across all thresholds
         t_start = time.time()
         strace.extract_strace(threshold_values)
-        print(f"  > Stratification done ({len(threshold_values)} strace) in {time.time() - t_start:.2f} s")
+        print(f"  > s-Trace extraction done ({len(threshold_values)} strace) in {time.time() - t_start:.2f} s")
 
-        # Save extracted strata for Stage 3 (GPU evaluation)
+        # Save extracted s-traces for Stage 3 (GPU evaluation)
         strace.save_light(strace_file_path)
         
         # Clean up intermediate Stage 1 graph to free up disk space
-        if os.path.exists(intermediate_file):
+        if args.cleanup and os.path.exists(intermediate_file):
             os.remove(intermediate_file)
 
     print(f"\n[STAGE 2 | CHUNK {args.chunk_id}] Complete.")

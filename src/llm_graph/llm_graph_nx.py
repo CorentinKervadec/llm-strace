@@ -105,7 +105,7 @@ def compute_leverage_scores(X, k=None):
     
     return scores
 
-AVAILABLE_IMPORTANCE_MODES = [None, 'random', 'cosim', 'norm', 'normf', 'norm_l2', 'sim', 'ifr', 'lev_1', 'lev_2', 'lev_4', 'lev_8', 'lev_16', 'lev_32', 'lev_64', 'lev_128', 'lev_256']
+AVAILABLE_IMPORTANCE_MODES = [None, 'random', 'cosim', 'L1-norm', 'normf', 'norm_l2', 'sim', 'ifr', 'lev_1', 'lev_2', 'lev_4', 'lev_8', 'lev_16', 'lev_32', 'lev_64', 'lev_128', 'lev_256']
 
 class LLM_Graph_NX(nx.MultiDiGraph):
     """
@@ -287,7 +287,7 @@ class LLM_Graph_NX(nx.MultiDiGraph):
             
             # importance = proximity / proximity.sum()
 
-        elif self.importance_mode == 'norm':
+        elif self.importance_mode == 'L1-norm':
             edge_norm = torch.norm(edge_vectors, p=distance_norm, dim=1)
             importance = edge_norm / edge_norm.sum()
             # print('importance', importance)
@@ -737,85 +737,3 @@ def load_from_file(file_path: str):
     
     print(f"[LLM_Graph_NX] Successfully loaded from {file_path}")
     return new_llm_graph
-    
-    # def get_random_connected_subgraph(self, n_edges):
-    #     """
-    #     Generates a random, connected subgraph of 'n_edges' starting
-    #     from 'start_node' by performing a randomized expansion.
-
-    #     The "connected" property means all nodes in the subgraph are
-    #     reachable from 'start_node' by following the graph's directed edges.
-
-    #     Args:
-    #         n_edges (int): The target number of edges for the subgraph.
-
-    #     Returns:
-    #         nx.MultiDiGraph: The randomly generated, connected subgraph.
-    #     """
-
-    #     start_node = self.get_output_node()
-
-    #     # 1. Initialize
-    #     subgraph_edges = []
-        
-    #     # active_nodes are nodes in the subgraph that we can expand from
-    #     active_nodes = [start_node] 
-        
-    #     # nodes_in_subgraph tracks all nodes we've added
-    #     nodes_in_subgraph = {start_node} 
-        
-    #     # Use a set for efficient checking of added edges
-    #     edges_added_set = set()
-
-    #     # 2. Loop until we have enough edges or run out of options
-    #     while len(subgraph_edges) < n_edges and active_nodes:
-            
-    #         # Pick a random node from our known subgraph to expand from
-    #         current_node = random.choice(active_nodes)
-            
-    #         # Get all its in-edges (because we are doing it in a backward fashion, starting from the end of the network)
-    #         # We must use keys=True for MultiDiGraph
-    #         in_edges = list(self.in_edges(current_node, keys=True))
-            
-    #         # Filter in-edges we've already added
-    #         available_edges = [e for e in in_edges if e not in edges_added_set]
-            
-    #         if not available_edges:
-    #             # This node is exhausted (no more *new* out-edges)
-    #             # Remove it from the active list and try another node
-    #             active_nodes.remove(current_node)
-    #             continue
-                
-    #         # 3. Pick a random edge and add it
-    #         chosen_edge = random.choice(available_edges)
-    #         (u, v, k) = chosen_edge
-            
-    #         subgraph_edges.append(chosen_edge)
-    #         edges_added_set.add(chosen_edge)
-            
-    #         # 4. If this edge leads to a new node, add it to our lists
-    #         if u not in nodes_in_subgraph:
-    #             nodes_in_subgraph.add(u)
-    #             active_nodes.append(u)
-                
-    #     # 5. Create the final subgraph from the list of edges
-    #     # .edge_subgraph() automatically includes all nodes for those edges
-    #     # We use .copy() to make it an independent graph
-    #     final_subgraph = self.edge_subgraph(subgraph_edges).copy()
-        
-    #     return final_subgraph
-
-
-"""
-TODO:
-- treewidth
-- assortativity by degree
-- max clique
-- dominating set
-- min maximal matching
-- centrality (plot a distribution). Per layer centrality? Per token centrality?
-- transitivity: inform on the presence of hihly connected node clusters
-- communities: girvan_newman, greedy_modularity_communities
-- number_strongly_connected_components(
-- condensation -> useful for graph visualisation?
-"""

@@ -46,7 +46,7 @@ AVAILABLE_MODELS = [
     "meta-llama/Llama-2-13b-hf"
 ]
 
-def main(model_name: str):
+def main(model_name: str, threshold_values: list = None):
     """
     Main function to run the tracing and evaluation pipeline on a few test sentences.
     
@@ -78,16 +78,17 @@ def main(model_name: str):
     # Note: half precision causes approximation errors.
     half_precision = False 
         
-    # importance_mode: 'norm' (L1-norm) is the default as per the s-Trace method.
-    importance_mode = 'norm'
+    # importance_mode: 'L1-norm' is the default as per the s-Trace method.
+    importance_mode = 'L1-norm'
     
     # Target grid sizes matching the paper's Appendix D.2
-    threshold_values = [
-        1e-5, 1e-4, 2e-4, 4e-4, 8e-4,
-        1e-3, 1.2e-3, 1.4e-3, 2e-3, 3e-3, 4e-3, 6e-3, 8e-3,
-        1e-2, 2e-2, 4e-2, 6e-2, 8e-2,
-        1e-1, 2e-1, 4e-1, 6e-1, 8e-1
-    ]
+    if threshold_values is None:
+        threshold_values = [
+            1e-5, 1e-4, 2e-4, 4e-4, 8e-4,
+            1e-3, 1.2e-3, 1.4e-3, 2e-3, 3e-3, 4e-3, 6e-3, 8e-3,
+            1e-2, 2e-2, 4e-2, 6e-2, 8e-2,
+            1e-1, 2e-1, 4e-1, 6e-1, 8e-1
+        ]
 
     # For larger models, you might want to save GPU memory using CPU offload
     CPU_OFFLOAD = False
@@ -179,10 +180,18 @@ if __name__ == "__main__":
         help='Hugging Face name of the model (e.g., "mistralai/Mistral-7B-v0.1").'
     )
     
+    parser.add_argument(
+        '--thresholds',
+        type=float,
+        nargs='+',
+        default=[1e-5, 1e-4, 2e-4, 4e-4, 8e-4, 1e-3, 1.2e-3, 1.4e-3, 2e-3, 3e-3, 4e-3, 6e-3, 8e-3, 1e-2, 2e-2, 4e-2, 6e-2, 8e-2, 1e-1, 2e-1, 4e-1, 6e-1, 8e-1],
+        help='Target grid sizes matching the paper.'
+    )
+    
     args = parser.parse_args()
 
     model_is_valid = any(args.model_name.startswith(key_model) for key_model in AVAILABLE_MODELS)
     if not model_is_valid:
         raise NotImplementedError(f"LLM_STRACE not implemented for model {args.model_name}.")
 
-    main(args.model_name)
+    main(args.model_name, threshold_values=args.thresholds)

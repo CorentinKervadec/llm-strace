@@ -533,14 +533,14 @@ class Olmo2DecoderLayer(GradientCheckpointingLayer):
         #            |
         # after_mlp = before_mlp + mlp_out = residual_stream[layer + 1][token] (:= residual connection after the MLP)
         #
-        # Quick reference: TODO: revise what follows
-        # - before_attn: residual_stream[layer][token]
-        # - head_out:    head_outputs[layer, token] with shape [n_tokens, n_heads, hidden_dim];
-        #                head_out[src_token, head] is the per-head vector used as an incoming attention edge
+        # Quick reference for intermediate representations:
+        # - before_attn: residual_stream[layer][token] (node vector before attention)
+        # - head_out:    decomposed per-head attention contributions with shape [batch, tgt_token, src_token, n_heads, hidden_dim];
+        #                head_out[b, tgt_token, src_token, head] is the vector used as an incoming attention edge
         # - attn_out:    aggregated attention output for the current token (attn contribution)
         # - before_mlp:  before_attn + attn_out (node vector before MLP)
-        # - mlp_out:     mlp_outputs[layer, token] (MLP contribution edge)
-        # - after_mlp:   residual_stream[layer + 1][token] (node vector after MLP)
+        # - mlp_out:     MLP output contribution for the current token (MLP contribution edge)
+        # - after_mlp:   before_mlp + mlp_out (node vector after MLP, equivalent to residual_stream[layer + 1][token])
         """
 
         intermediate_representations = {}

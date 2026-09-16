@@ -24,6 +24,8 @@ from src.modified_transformers.utils import get_model_class, identify_model_type
 def load_sentence(data_file: str, index: int) -> dict:
     """
     Retrieves a specific sentence and its ground truth next word from the dataset.
+    The ground truth next word is not used for faithfulness evaluation (which compares against the full model distribution)
+    but is sometimes used to estimate perplexity of the LLM on the dataset.
     Handles both structured .tsv (wikitext) and plain .txt files.
     """
     if 'wikitext' in data_file or 'df' in data_file:
@@ -50,7 +52,8 @@ def main():
     parser.add_argument('--total_sentences', type=int, required=True, help='Total size of the dataset.')
     parser.add_argument('--data_file', type=str, required=True, help='Path to the dataset file.')
     parser.add_argument('--intermediate_dir', type=str, required=True, help='Output directory for the extracted graphs.')
-    parser.add_argument('--importance', type=str, required=True, help='Edge importance metric to use.')
+    parser.add_argument('--importance', type=str, default='L1-norm', help='Edge importance metric to use.')
+    parser.add_argument('--precision', type=str, choices=['float16', 'float32'], default='float16', help='Model precision.')
     parser.add_argument('--cpu_offload', action='store_true', help='Enable CPU offload for large models.')
     parser.add_argument('--checkpoint', type=str, default='main')
     args = parser.parse_args()
@@ -59,8 +62,8 @@ def main():
     print(f"[STAGE 1 | CHUNK {args.chunk_id}] Initializing model...")
     start_time = time.time()
     
-    # We use float16 by default to fit larger models into VRAM.
-    target_dtype = torch.float16 
+    # Set dtype based on argument
+    target_dtype = torch.float16 if args.precision == 'float16' else torch.float32
     
     model_type = identify_model_type(args.model_name)
     hf_constructor = get_model_class(model_type)
