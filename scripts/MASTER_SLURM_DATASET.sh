@@ -3,30 +3,31 @@
 #-----------------------------------------------------------------------
 # Master SLURM Job Submission Script
 #
-# Usage: ./submit_jobs.sh <partition> <model_name> <importance> <strace> <dataset_name> <split> <nb_data> <chunk_size> [start_stage] [end_stage]
+# Usage: ./MASTER_SLURM_DATASET.sh <partition> <CPU_OFFLOAD> <model_name> <checkpoint> <importance> <dataset_name> <split> <nb_data> <chunk_size> [start_stage] [end_stage]
 #
 # Arguments:
-#   1. partition:    (Required) e.g., "alien"
-#   2. model_name:   (Required) e.g., "allenai/OLMo-2-0425-1B"
-#   3. importance:   (Required) e.g., "norm"
-#   4. strace:       (Required) e.g., "threshold"
-#   5. dataset_name: (Required) e.g., "c4" or "wikitext"
-#   6. split:        (Required) e.g., "0" or "none" (use "none" or "" if no split)
-#   7. nb_data:      (Required) e.g., 10000
-#   8. chunk_size:   (Required) e.g., 50
-#   9. start_stage:  (Optional) Default: 1
-#   10. end_stage:   (Optional) Default: 4
+#   1. partition:    (Required) e.g., "high-gpu"
+#   2. cpu offload   (Required) 0 (no offload) or 1
+#   3. model_name:   (Required) e.g., "allenai/OLMo-2-0425-1B"
+#   4. checkpoint    (Required) e.g., 'main'
+#   5. importance:   (Required) e.g., "L1-norm"
+#   6. dataset_name: (Required) e.g., "c4" or "wikitext"
+#   7. split:        (Required) e.g., "0", "40" or "none" (use "none" or "" if no split)
+#   8. nb_data:      (Required) e.g., 10000
+#   9. chunk_size:   (Required) e.g., 50
+#   10. start_stage:  (Optional) Default: 1 (which stage to start with)
+#   11. end_stage:   (Optional) Default: 3
 #
 # Example:
-#   ./submit_jobs.sh alien "allenai/OLMo-2-0425-1B" norm threshold c4 0 10000 50
+#   ./MASTER_SLURM_DATASET.sh high-gpu 0 "allenai/OLMo-2-0425-1B" main L1-norm "wikitext" 40 5000 100 1 3
 #-----------------------------------------------------------------------
 
 set -e # Exit immediately if any command fails
 
 # --- 1. Input Validation ---
-if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ] || [ -z "$5" ] || [ -z "$7" ] || [ -z "$8" ] || [ -z "$9" ] || [ -z "$10" ]; then
+if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ] || [ -z "$5" ] || [ -z "$7" ] || [ -z "$8" ] || [ -z "$9" ]; then
     echo "Error: Missing required arguments."
-    echo "Usage: $0 <partition> <CPU_OFFLOAD> <model_name> <checkpoint> <importance> <strace> <dataset_name> <split> <nb_data> <chunk_size> [start_stage] [end_stage]"
+    echo "Usage: $0 <partition> <CPU_OFFLOAD> <model_name> <checkpoint> <importance> <dataset_name> <split> <nb_data> <chunk_size> [start_stage] [end_stage]"
     exit 1
 fi
 
@@ -35,16 +36,17 @@ CPU_OFFLOAD=$2
 MODEL_NAME=$3
 CHECKPOINT=$4
 IMPORTANCE=$5
-STRACE=$6
-DATASET_NAME=$7
-SPLIT=$8
-NB_DATA=$9
-CHUNK_SIZE=${10}
-START_STAGE=${11:-1}
-END_STAGE=${12:-4}
+DATASET_NAME=$6
+SPLIT=$7
+NB_DATA=$8
+CHUNK_SIZE=${9}
+START_STAGE=${10:-1}
+END_STAGE=${11:-3}
 
 MAX_CONCURRENT_JOBS=50
 EXCLUDED_NODES="node044,node042"
+
+LLM_STRACE_PATH='/homes/users/ckervadec/llm-strace'
 
 # Handle Split Logic for Folders
 if [ "$SPLIT" == "none" ] || [ -z "$SPLIT" ]; then
@@ -62,7 +64,6 @@ echo "GPU Partition:   $PARTITION"
 echo "Model Name:      $MODEL_NAME"
 echo "Checkpoint:      $CHECKPOINT"
 echo "Importance:      $IMPORTANCE"
-echo "Strace:          $STRACE"
 echo "Dataset Name:    $DATASET_NAME"
 echo "Split:           $SPLIT"
 echo "NB Data:         $NB_DATA"
@@ -78,7 +79,7 @@ PARTITION_FLAGS="--partition=$PARTITION --qos=alien"
 SANITIZED_MODEL_NAME=${MODEL_NAME##*/}
 echo "Sanitized Model Name: $SANITIZED_MODEL_NAME"
 
-DATASET_FILE="$(pwd)/data/${DATASET_NAME}_${SPLIT_VAL}.txt"
+DATASET_FILE="$LLM_STRACE_PATH/data/${DATASET_NAME}_${SPLIT_VAL}.txt"
 
 echo "Dataset File: $DATASET_FILE"
 
@@ -112,7 +113,6 @@ echo "Slurm Array Range: $ARRAY_RANGE"
 export MODEL_NAME=$MODEL_NAME
 export CHECKPOINT=$CHECKPOINT
 export IMPORTANCE=$IMPORTANCE
-export STRACE=$STRACE
 export DATA_FILE=$DATASET_FILE
 export CHUNK_SIZE=$CHUNK_SIZE
 export TOTAL_SENTENCES=$TOTAL_SENTENCES
@@ -124,17 +124,13 @@ export CPU_OFFLOAD=$CPU_OFFLOAD
 
 # Define all directory paths
 # Base directory uses just the DATASET_NAME
-BASE_OUTPUT_DIR="$(pwd)/results_${IMPORTANCE}_${STRACE}_${DATASET_NAME}_emnlp/${SANITIZED_MODEL_NAME}"
+BASE_OUTPUT_DIR="$LLM_STRACE_PATH/results_${IMPORTANCE}_${DATASET_NAME}_emnlp/${SANITIZED_MODEL_NAME}"
 
 # Subdirectories use the SPLIT_SUFFIX (e.g., _S0 or empty)
 # Note: I removed ${SENTENCE_LENGTH} from these paths as requested
 export INTERMEDIATE_DIR="${BASE_OUTPUT_DIR}/${CHECKPOINT}/intermediate_graphs${SPLIT_SUFFIX}"
-# export INTERMEDIATE_DIR="${BASE_OUTPUT_DIR}/final_straces${SPLIT_SUFFIX}" # we reuse the graph already computed
 export STRACE_DIR="${BASE_OUTPUT_DIR}/${CHECKPOINT}/intermediate_straces${SPLIT_SUFFIX}"
-# export STRACE_DIR="${BASE_OUTPUT_DIR}/final_straces${SPLIT_SUFFIX}"
-# export STRACE_DIR="${BASE_OUTPUT_DIR}/final_straces${SPLIT_SUFFIX}"
 export FINAL_DIR="${BASE_OUTPUT_DIR}/${CHECKPOINT}/final_straces${SPLIT_SUFFIX}"
-# export FINAL_DIR="${BASE_OUTPUT_DIR}/final_straces${SPLIT_SUFFIX}_size"
 export PDF_FILE="${BASE_OUTPUT_DIR}/${CHECKPOINT}/strace_analysis_plots${SPLIT_SUFFIX}.pdf"
 LOG_DIR="${BASE_OUTPUT_DIR}/slurm_logs${SPLIT_SUFFIX}"
 
@@ -192,7 +188,7 @@ if [ "$START_STAGE" -le 1 ] && [ "$END_STAGE" -ge 1 ]; then
         --output="${LOG_DIR}/1_gpu_%A_%a.out" \
         --exclude=$EXCLUDED_NODES \
         --job-name="${SANITIZED_MODEL_NAME}_strace_gpu" \
-        1_SLURM_GPU.sh)
+        1_EXTRACTION_GPU.sbatch)
 
     if [ -z "$GPU_JOB_ID" ]; then
         echo "Error: Failed to submit GPU job. Exiting."
@@ -221,7 +217,7 @@ if [ "$START_STAGE" -le 2 ] && [ "$END_STAGE" -ge 2 ]; then
         --output="${LOG_DIR}/2_cpu_%A_%a.out" \
         --exclude=$EXCLUDED_NODES \
         --job-name="${SANITIZED_MODEL_NAME}_strace_cpu" \
-        2_SLURM_CPU.sh)
+        2_STRATIFICATION_CPU.sbatch)
 
     if [ -z "$CPU_JOB_ID" ]; then
         echo "Error: Failed to submit CPU job. Exiting."
@@ -252,7 +248,7 @@ if [ "$START_STAGE" -le 3 ] && [ "$END_STAGE" -ge 3 ]; then
         --output="${LOG_DIR}/3_gpu_%A_%a.out" \
         --exclude=$EXCLUDED_NODES \
         --job-name="${SANITIZED_MODEL_NAME}_eval_gpu" \
-        3_SLURM_GPU.sh)
+        3_EVALUATION_GPU.sbatch)
 
     if [ -z "$GPU_JOB_ID_2" ]; then
         echo "Error: Failed to submit GPU Stage 3 job. Exiting."
@@ -260,34 +256,6 @@ if [ "$START_STAGE" -le 3 ] && [ "$END_STAGE" -ge 3 ]; then
     fi
     echo "  -> Stage 3 submitted with Array ID: $GPU_JOB_ID_2"
     LAST_JOB_ID=$GPU_JOB_ID_2
-fi
-
-# --- Stage 4: Plotting ---
-if [ "$START_STAGE" -le 4 ] && [ "$END_STAGE" -ge 4 ]; then
-    echo "Submitting Stage 4: Plotting..."
-
-    DEP_FLAG=""
-    if [ ! -z "$LAST_JOB_ID" ]; then
-        DEP_FLAG="--dependency=afterany:${LAST_JOB_ID}"
-        echo "  -> Will run after all Stage 3 jobs have finished."
-    elif [ "$START_STAGE" -eq 4 ]; then
-        check_files $FINAL_DIR $TOTAL_SENTENCES "Stage 4 (Plotting)"
-    fi
-    
-    PLOT_JOB_ID=$(sbatch --parsable \
-        $DEP_FLAG \
-        --export=ALL,FINAL_DIR,PDF_FILE \
-        --output="${LOG_DIR}/4_plot_%j.out" \
-        --exclude=$EXCLUDED_NODES \
-        --job-name="${SANITIZED_MODEL_NAME}_plot" \
-        SLURM_PLOT.sh)
-    
-    if [ -z "$PLOT_JOB_ID" ]; then
-        echo "Error submitting Stage 4 plotting job."
-        exit 1
-    fi
-    echo "  -> Stage 4 Plotting Job ID: $PLOT_JOB_ID"
-    LAST_JOB_ID=$PLOT_JOB_ID
 fi
 
 echo ""

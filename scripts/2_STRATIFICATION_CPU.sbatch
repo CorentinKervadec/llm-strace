@@ -6,9 +6,11 @@
 #SBATCH --cpus-per-task=4        # Number of CPU cores per task
 #SBATCH --mem=64G                # Job memory request
 #SBATCH --time=05:00:00          # Time limit (4 hours, adjust for 100 sentences)
-#SBATCH --gpus=0                 # Explicitly request 0 GPUs
-#SBATCH --partition=medium          # Run on the 'cpu' partition (adjust as needed)
+#SBATCH --partition=high-cpu          # Run on the 'cpu' partition (adjust as needed)
 
+# TODO
+ENV_PATH='/data/samanthafs/projects/lab_mbaroni/ckervadec/conda_envs/llm-trace'
+LLM_STRACE_PATH='/homes/users/ckervadec/llm-strace'
 
 # --- This script is submitted by submit_jobs.sh ---
 # --- It expects $SLURM_ARRAY_TASK_ID to be set (as chunk_id) ---
@@ -16,11 +18,14 @@
 echo "--- Starting CPU Job Chunk $SLURM_ARRAY_TASK_ID ---"
 date
 
-# Load necessary modules (e.g., Python)
-# module load python/3.10
-
 # Activate the Python environment
-source activate unnatural_prompt
+# load miniconda
+ml modulepath/UPF/apps
+ml Miniconda3
+# load conda env
+source activate $ENV_PATH
+
+cd $LLM_STRACE_PATH
 
 # Get arguments from the environment variables set in submit_jobs.sh
 : "${INTERMEDIATE_DIR:?INTERMEDIATE_DIR not set}"
@@ -28,7 +33,6 @@ source activate unnatural_prompt
 : "${CHUNK_SIZE:?CHUNK_SIZE not set}"
 : "${TOTAL_SENTENCES:?TOTAL_SENTENCES not set}"
 : "${IMPORTANCE:?IMPORTANCE not set}"
-: "${STRACE:?STRACE not set}"
 
 # Run the CPU-bound Python script
 python 2_stratification_cpu.py \
@@ -37,8 +41,7 @@ python 2_stratification_cpu.py \
     --total_sentences $TOTAL_SENTENCES \
     --intermediate_dir $INTERMEDIATE_DIR \
     --strace_dir $STRACE_DIR \
-    --importance $IMPORTANCE \
-    --strace $STRACE
+    --importance $IMPORTANCE
 
 echo "--- Finished CPU Job Chunk $SLURM_ARRAY_TASK_ID ---"
 date

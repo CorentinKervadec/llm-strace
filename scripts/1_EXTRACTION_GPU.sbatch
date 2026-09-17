@@ -6,9 +6,11 @@
 #SBATCH --cpus-per-task=4        # Number of CPU cores per task
 #SBATCH --mem=64G                # Job memory request
 #SBATCH --time=05:00:00          # Time limit (2 hours, adjust for 100 sentences)
-#SBATCH --gpus=1                 # Request 1 GPU
+#SBATCH --gres=gpu:1 
 
-
+# TODO
+ENV_PATH='/data/samanthafs/projects/lab_mbaroni/ckervadec/conda_envs/llm-trace'
+LLM_STRACE_PATH='/homes/users/ckervadec/llm-strace'
 
 # --- This script is submitted by submit_jobs.sh ---
 # --- It expects $SLURM_ARRAY_TASK_ID to be set (as chunk_id) ---
@@ -16,15 +18,15 @@
 echo "--- Starting GPU Job Chunk $SLURM_ARRAY_TASK_ID ---"
 date
 
-# Load necessary modules (e.g., Python, CUDA)
-# module load python/3.10
-# module load cuda/11.8
-
-# Loading CUDA module
-module --ignore-cache load CUDA/11.8
-
 # Activate the Python environment
-source activate unnatural_prompt
+# load miniconda
+ml modulepath/UPF/apps
+ml Miniconda3
+# load conda env
+source activate $ENV_PATH
+
+cd $LLM_STRACE_PATH
+
 
 # Get arguments from the environment variables set in submit_jobs.sh
 : "${DATA_FILE:?DATA_FILE not set}"
