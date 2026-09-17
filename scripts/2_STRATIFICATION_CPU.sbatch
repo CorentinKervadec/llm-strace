@@ -22,8 +22,10 @@ date
 # load miniconda
 ml modulepath/UPF/apps
 ml Miniconda3
-# load conda env
-source activate $ENV_PATH
+
+# Initialize Conda for non-interactive bash subshells
+eval "$(conda shell.bash hook)"
+conda activate $ENV_PATH
 
 cd $LLM_STRACE_PATH
 

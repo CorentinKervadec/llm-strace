@@ -42,7 +42,7 @@ CMD_ARGS=(
     --chunk_id "$SLURM_ARRAY_TASK_ID"
     --chunk_size "$CHUNK_SIZE"
     --total_sentences "$TOTAL_SENTENCES"
-    # --strace_dir "$STRACE_DIR"
+    --strace_dir "$STRACE_DIR"
     --final_dir "$FINAL_DIR"
     --checkpoint "$CHECKPOINT"
 )
