@@ -45,6 +45,7 @@ CMD_ARGS=(
     --strace_dir "$STRACE_DIR"
     --final_dir "$FINAL_DIR"
     --checkpoint "$CHECKPOINT"
+    --cleanup
 )
 
 # Conditionally add the flag

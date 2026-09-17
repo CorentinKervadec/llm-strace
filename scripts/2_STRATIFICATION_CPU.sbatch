@@ -43,7 +43,8 @@ python 2_stratification_cpu.py \
     --total_sentences $TOTAL_SENTENCES \
     --intermediate_dir $INTERMEDIATE_DIR \
     --strace_dir $STRACE_DIR \
-    --importance $IMPORTANCE
+    --importance $IMPORTANCE \
+    --cleanup
 
 echo "--- Finished CPU Job Chunk $SLURM_ARRAY_TASK_ID ---"
 date
