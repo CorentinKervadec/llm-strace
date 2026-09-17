@@ -28,20 +28,15 @@ def load_sentence(data_file: str, index: int) -> dict:
     but is sometimes used to estimate perplexity of the LLM on the dataset.
     Handles both structured .tsv (wikitext) and plain .txt files.
     """
-    if 'wikitext' in data_file or 'df' in data_file:
-        with open(data_file, 'r', encoding='utf-8') as f:
-            for i, line in enumerate(f):
-                if i == index:
-                    parts = line.strip().split('\t')
-                    if len(parts) >= 4:
-                        return {"input": parts[0], "gt_next": parts[3]}
-                    print(f"[DATA] Error: Line {index} lacks required columns.")
-                    return None
-    else:
-        with open(data_file, 'r', encoding='utf-8') as f:
-            for i, line in enumerate(f):
-                if i == index:
-                    return {"input": line.strip('\n'), "gt_next": 'x'}
+    
+    with open(data_file, 'r', encoding='utf-8') as f:
+        for i, line in enumerate(f):
+            if i == index:
+                parts = line.strip().split('\t')
+                if len(parts) >= 2:
+                    return {"input": parts[0], "gt_next": parts[1]}
+                print(f"[DATA] Error: Line {index} lacks required columns.")
+                return None
     return None
 
 def main():
