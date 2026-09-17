@@ -44,7 +44,6 @@ START_STAGE=${10:-1}
 END_STAGE=${11:-3}
 
 MAX_CONCURRENT_JOBS=50
-EXCLUDED_NODES="node044,node042"
 
 LLM_STRACE_PATH='/homes/users/ckervadec/llm-strace'
 
@@ -72,7 +71,7 @@ echo "Start Stage:     $START_STAGE"
 echo "End Stage:       $END_STAGE"
 echo "---------------------"
 
-PARTITION_FLAGS="--partition=$PARTITION --qos=alien"
+PARTITION_FLAGS="--partition=$PARTITION"
 
 # --- 2. Configuration & File/Directory Setup ---
 
@@ -186,7 +185,6 @@ if [ "$START_STAGE" -le 1 ] && [ "$END_STAGE" -ge 1 ]; then
         $PARTITION_FLAGS \
         --export=ALL,INTERMEDIATE_DIR \
         --output="${LOG_DIR}/1_gpu_%A_%a.out" \
-        --exclude=$EXCLUDED_NODES \
         --job-name="${SANITIZED_MODEL_NAME}_strace_gpu" \
         1_EXTRACTION_GPU.sbatch)
 
@@ -215,7 +213,6 @@ if [ "$START_STAGE" -le 2 ] && [ "$END_STAGE" -ge 2 ]; then
         $DEP_FLAG \
         --export=ALL,INTERMEDIATE_DIR,STRACE_DIR \
         --output="${LOG_DIR}/2_cpu_%A_%a.out" \
-        --exclude=$EXCLUDED_NODES \
         --job-name="${SANITIZED_MODEL_NAME}_strace_cpu" \
         2_STRATIFICATION_CPU.sbatch)
 
@@ -246,7 +243,6 @@ if [ "$START_STAGE" -le 3 ] && [ "$END_STAGE" -ge 3 ]; then
         $PARTITION_FLAGS \
         --export=ALL,STRACE_DIR,FINAL_DIR \
         --output="${LOG_DIR}/3_gpu_%A_%a.out" \
-        --exclude=$EXCLUDED_NODES \
         --job-name="${SANITIZED_MODEL_NAME}_eval_gpu" \
         3_EVALUATION_GPU.sbatch)
 
