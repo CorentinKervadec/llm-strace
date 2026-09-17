@@ -85,6 +85,7 @@ WORKBENCH.sh
 !src/modified_transformers/
 !data/wikitext_40.txt
 !data/dummy_40.txt
+!data/README.md
 !analyse/
 !find_max_context/
 !test/
