@@ -83,7 +83,8 @@ WORKBENCH.sh
 !src/llm_hooked/
 !src/llm_trace/
 !src/modified_transformers/
-!data/
+!data/wikitext_40.txt
+!data/dummy_40.txt
 !analyse/
 !find_max_context/
 !test/
