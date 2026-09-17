@@ -123,7 +123,7 @@ export CPU_OFFLOAD=$CPU_OFFLOAD
 
 # Define all directory paths
 # Base directory uses just the DATASET_NAME
-BASE_OUTPUT_DIR="$LLM_STRACE_PATH/results_${IMPORTANCE}_${DATASET_NAME}_emnlp/${SANITIZED_MODEL_NAME}"
+BASE_OUTPUT_DIR="$LLM_STRACE_PATH/results_${IMPORTANCE}_${DATASET_NAME}/${SANITIZED_MODEL_NAME}"
 
 # Subdirectories use the SPLIT_SUFFIX (e.g., _S0 or empty)
 # Note: I removed ${SENTENCE_LENGTH} from these paths as requested
