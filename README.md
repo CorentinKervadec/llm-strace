@@ -78,9 +78,9 @@ python 3_extract_last_hidden.py \
 
 ## Large Scale Execution
 
-For running across a compute cluster, you can use the provided Slurm master script. Note: this script is provided as an example, you will need to adapt it to your specific computation infrastructure.
+For running across a compute cluster, you can use the provided Slurm master script in scripts/. Note: this script is provided as an example, you will need to adapt it to your specific computation infrastructure.
 ```bash
-./MASTER_SLURM_DATASET.sh <partition> <CPU_OFFLOAD> <model_name> <checkpoint> <importance> <strace> <dataset_name> <split> <nb_data> <chunk_size>
+./scripts/MASTER_SLURM_DATASET.sh <partition> <CPU_OFFLOAD> <model_name> <checkpoint> <importance> <dataset_name> <split> <nb_data> <chunk_size> [start_stage] [end_stage]
 ```
 
 ### Note on Hardware & Context Windows: 
