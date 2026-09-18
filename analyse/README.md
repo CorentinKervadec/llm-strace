@@ -49,6 +49,7 @@ Executing the script generates four processed pickle files and a text correlatio
 ## Data Structures of Generated .pkl Files
 
 ### 1. processed_data_agg_<len>_<files>.pkl
+```json
 {
     "aggregate": {
         "<model_name>": {
@@ -73,8 +74,10 @@ Executing the script generates four processed pickle files and a text correlatio
         ...
     }
 }
+```
 
 ### 2. processed_data_sentences_<len>_<files>.pkl
+```json
 {
     "<model_name>": {
         "low": [                      # 5 lowest prediction entropy sentences
@@ -90,8 +93,10 @@ Executing the script generates four processed pickle files and a text correlatio
         "high": [ ... ]               # 5 highest prediction entropy sentences
     }
 }
+```
 
 ### 3. processed_data_topology_<len>_<files>.pkl
+```json
 {
     "<model_name>": {
         "size": np.ndarray,           # (150,) Logarithmic density grid s
@@ -106,8 +111,10 @@ Executing the script generates four processed pickle files and a text correlatio
         ]
     }
 }
+```
 
 ### 4. processed_data_components_<len>_<files>.pkl
+```json
 {
     "<model_name>": {
         "size": np.ndarray,           # (150,) Logarithmic density grid s
@@ -119,6 +126,7 @@ Executing the script generates four processed pickle files and a text correlatio
         }
     }
 }
+```
 
 ### 5. data_aggregated_emnlp26.pkl
 In addition, you will find in this folder the `data_aggregated_emnlp26.pkl` file, containing all consolidated experimental data evaluated in the EMNLP 2026 paper across all models and datasets.
