@@ -8,6 +8,15 @@
 #SBATCH --time=05:00:00          # Time limit (2 hours, adjust for 100 sentences)
 #SBATCH --gres=gpu:1 
 
+# Explicitly set Hugging Face cache variables
+export HF_HOME="/scratch/lab_mbaroni/shared_data/hf_cache"
+export TRANSFORMERS_CACHE="/scratch/lab_mbaroni/shared_data/hf_cache"
+export HF_HUB_CACHE="/scratch/lab_mbaroni/shared_data/hf_cache"
+
+# verify environment variable in job logs
+echo "Using HF_HOME: $HF_HOME"
+
+
 # TODO
 ENV_PATH='/data/samanthafs/projects/lab_mbaroni/ckervadec/conda_envs/llm-trace'
 LLM_STRACE_PATH='/homes/users/ckervadec/llm-strace'

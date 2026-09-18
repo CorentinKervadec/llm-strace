@@ -46,6 +46,7 @@ END_STAGE=${11:-3}
 MAX_CONCURRENT_JOBS=50
 
 LLM_STRACE_PATH='/homes/users/ckervadec/llm-strace'
+SAVE_BASE_DIR='/homes/users/ckervadec/scratch/llm-strace'
 
 # Handle Split Logic for Folders
 if [ "$SPLIT" == "none" ] || [ -z "$SPLIT" ]; then
@@ -123,10 +124,9 @@ export CPU_OFFLOAD=$CPU_OFFLOAD
 
 # Define all directory paths
 # Base directory uses just the DATASET_NAME
-BASE_OUTPUT_DIR="$LLM_STRACE_PATH/results_${IMPORTANCE}_${DATASET_NAME}/${SANITIZED_MODEL_NAME}"
+BASE_OUTPUT_DIR="$SAVE_BASE_DIR/results_${IMPORTANCE}_${DATASET_NAME}/${SANITIZED_MODEL_NAME}"
 
 # Subdirectories use the SPLIT_SUFFIX (e.g., _S0 or empty)
-# Note: I removed ${SENTENCE_LENGTH} from these paths as requested
 export INTERMEDIATE_DIR="${BASE_OUTPUT_DIR}/${CHECKPOINT}/intermediate_graphs${SPLIT_SUFFIX}"
 export STRACE_DIR="${BASE_OUTPUT_DIR}/${CHECKPOINT}/intermediate_straces${SPLIT_SUFFIX}"
 export FINAL_DIR="${BASE_OUTPUT_DIR}/${CHECKPOINT}/final_straces${SPLIT_SUFFIX}"
