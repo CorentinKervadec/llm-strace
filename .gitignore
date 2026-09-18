@@ -60,6 +60,8 @@ WORKBENCH.sh
 # Ignore all generated data files (this is the main output)
 
 *.npz
+*.pkl
+*.txt
 
 # Ignore all generated plots and reports
 
@@ -87,6 +89,7 @@ WORKBENCH.sh
 !data/dummy_40.txt
 !data/README.md
 !analyse/
+!analyse/plots/
 !find_max_context/
 !test/
 !utils/
