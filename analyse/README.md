@@ -38,11 +38,11 @@ The script will automatically find and process the LLMs that are in the base_dir
 
 Executing the script generates four processed pickle files and a text correlation report:
 
-- processed_data_agg_<len>_<files>.pkl       : Consolidated TV distance curves (s-trace, inverse, random) and Top-k nucleus recovery sizes.
-- processed_data_sentences_<len>_<files>.pkl : Extremal sentence samples (lowest 5 and highest 5 entropy sentences per model).
-- processed_data_topology_<len>_<files>.pkl  : Structural edge proportions (Attention, MLP, Residuals, and 4 layer depth quartiles) vs density s.
-- processed_data_components_<len>_<files>.pkl: Module-level cumulative presence over density s (only generated when --components is set).
-- correlations_report_<len>__<files>.txt     : Spearman rank correlations (rho) for entropy vs AUC-TV and pairwise cross-model sentence rankings.
+- processed_data_agg_`<len>`_`<files>`.pkl       : Consolidated TV distance curves (s-trace, inverse, random) and Top-k nucleus recovery sizes.
+- processed_data_sentences_`<len>`_`<files>`.pkl : Extremal sentence samples (lowest 5 and highest 5 entropy sentences per model).
+- processed_data_topology_`<len>`_`<files>`.pkl  : Structural edge proportions (Attention, MLP, Residuals, and 4 layer depth quartiles) vs density s.
+- processed_data_components_`<len>`_`<files>`.pkl: Module-level cumulative presence over density s (only generated when --components is set).
+- correlations_report_`<len>`__`<files>`.txt     : Spearman rank correlations (rho) for entropy vs AUC-TV and pairwise cross-model sentence rankings.
 
 --------------------------------------------------------------------------------
 
