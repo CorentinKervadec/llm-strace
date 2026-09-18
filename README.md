@@ -92,6 +92,64 @@ We have already included the following LLMs to our framework.
 | **Deepseek-LLM** | `deepseek-ai/deepseek-llm-7b-base`|
 | **Phi**| `microsoft/phi-4`|
 
+--------------------------------------------------------------------------------
+
+## Output Format
+
+For each instance in the dataset, Stage 3 output a `strace_final_{sid}.npz` file. Let's review what you can find inside it.
+
+The `strace_final_{sid}.npz` file contains the raw execution output, subgraph size arrays, reconstruction metrics, and nucleus recovery data for an individual instance evaluated across multiple graph pruning regimes.
+
+### File Keys & Data Structures
+
+When loaded via `numpy.load(..., allow_pickle=True)`, the `.npz` container exposes the following primary arrays and objects:
+
+#### 1. `strata_rel_size` (or `size`)
+- Type: `np.ndarray` (shape: `(N_strata,)`, dtype: `float64`)
+- Description: Array of relative subgraph edge densities s = |E_sub| / |E_full| evaluated across discrete strata steps (ranging from 10^-5 to 1.0).
+
+#### 2. `tv` / `tv_trace` / `tv_inv` / `tv_random`
+- Type: `np.ndarray` (shape: `(N_strata,)`, dtype: `float64`)
+- Description: Reconstruction error measured in Total Variation (TV) distance between full-model target logit distribution and the pruned model output at each density step s.
+
+#### 3. `nucleus_<K>` (e.g., `nucleus_60`, `nucleus_10`, `nucleus_1`)
+- Type: `np.ndarray` storing a pickled dictionary (accessible via `.item()`)
+- Description: Tracks top-k nucleus logit recovery predictions across different extraction regimes.
+- Internal Structure:
+  ```python
+  {
+      "trace": {
+          "only": [...],     # Target s-trace subgraph predictions
+          "inverse": [...]   # Inverse (complementary/pruned) edge predictions
+      },
+      "random": {
+          "only": [...]      # Baseline randomly pruned subgraph predictions
+      }
+  }
+  ```
+
+#### 4. `entropy`
+- Type: `float`
+- Description: Prediction entropy of the target model when evaluating the full, unpruned sentence graph.
+
+### Loading Example
+
+```python
+import numpy as np
+
+# Load the s-trace output file
+sid = 1
+data = np.load(f"strace_final_{sid}.npz", allow_pickle=True)
+
+# 1. Access relative trace densities
+rel_sizes = data["strata_rel_size"]  # Shape: (N_strata,)
+
+# 2. Access nucleus recovery stats
+nucleus_60 = data["nucleus_60"].item()
+trace_only_preds = nucleus_60["trace"]["only"]
+trace_inv_preds  = nucleus_60["trace"]["inverse"]
+random_preds     = nucleus_60["random"]["only"]
+```
 
 ## Large Scale Execution
 
