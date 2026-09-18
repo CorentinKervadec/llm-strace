@@ -133,6 +133,24 @@ In addition, you will find in this folder the `data_aggregated_emnlp26.pkl` file
 
 --------------------------------------------------------------------------------
 
+## How To process_hidden_states.py
+This script ggregates continuous hidden states across graph extraction regimes (`trace_only`, `random_only`, `trace_inverse`) to evaluate trajectory dynamics, structural alignment, and geometric metrics across trace strata.
+
+### Key Features**
+* **Trajectory Dynamics**: Tracks step-wise L2 velocity, consecutive cosine distance, and Menger curvature across trace strata.
+* **Distance & Alignment**: Computes mean pairwise Cosine and Euclidean (L2) distance matrices, state magnitudes, and Linear Centered Kernel Alignment (CKA) using optimized Gram matrix centering.
+* **Information Imbalance**: Calculates asymmetric k-nearest-neighbor rank imbalance matrices across strata using `dadapy`.
+* **Dimensionality Reduction**: Generates 2D t-SNE projections sampled across configuration representations.
+
+### CLI Options
+* `--hidden_dir` (Required): Path to directory containing `hidden_strata_*.npz` files.
+* `--strace_dir` (Required): Path to directory containing `strace_final_*.npz` files.
+* `--output_dir` (Default: `"processed_data"`): Directory where precomputed matrices and projections are saved.
+* `--max_tsne_samples` (Default: `3000`): Maximum vector sample size per configuration for t-SNE execution.
+* `--ii_k` (Default: `1`): Number of nearest neighbors (k) for Information Imbalance calculations.
+* **Outputs**: `aggregated_matrices.npz`, `tsne_embeddings_summary.tsv`
+--------------------------------------------------------------------------------
+
 ## Visualization Scripts for Model Graph & Trajectory Analysis
 
 Plotting scripts to reproduce the figures from the EMNLP 2026 paper using these generated .pkl files have been added to the `plots/` folder.
