@@ -186,7 +186,7 @@ if [ "$START_STAGE" -le 1 ] && [ "$END_STAGE" -ge 1 ]; then
         --export=ALL,INTERMEDIATE_DIR \
         --output="${LOG_DIR}/1_gpu_%A_%a.out" \
         --job-name="${SANITIZED_MODEL_NAME}_strace_gpu" \
-        1_EXTRACTION_GPU.sbatch)
+        ./scripts/1_EXTRACTION_GPU.sbatch)
 
     if [ -z "$GPU_JOB_ID" ]; then
         echo "Error: Failed to submit GPU job. Exiting."
@@ -214,7 +214,7 @@ if [ "$START_STAGE" -le 2 ] && [ "$END_STAGE" -ge 2 ]; then
         --export=ALL,INTERMEDIATE_DIR,STRACE_DIR \
         --output="${LOG_DIR}/2_cpu_%A_%a.out" \
         --job-name="${SANITIZED_MODEL_NAME}_strace_cpu" \
-        2_STRATIFICATION_CPU.sbatch)
+        ./scripts/2_STRATIFICATION_CPU.sbatch)
 
     if [ -z "$CPU_JOB_ID" ]; then
         echo "Error: Failed to submit CPU job. Exiting."
@@ -244,7 +244,7 @@ if [ "$START_STAGE" -le 3 ] && [ "$END_STAGE" -ge 3 ]; then
         --export=ALL,STRACE_DIR,FINAL_DIR \
         --output="${LOG_DIR}/3_gpu_%A_%a.out" \
         --job-name="${SANITIZED_MODEL_NAME}_eval_gpu" \
-        3_EVALUATION_GPU.sbatch)
+        ./scripts/3_EVALUATION_GPU.sbatch)
 
     if [ -z "$GPU_JOB_ID_2" ]; then
         echo "Error: Failed to submit GPU Stage 3 job. Exiting."
