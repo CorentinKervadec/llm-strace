@@ -136,7 +136,7 @@ In addition, you will find in this folder the `data_aggregated_emnlp26.pkl` file
 ## How To process_hidden_states.py
 This script ggregates continuous hidden states across graph extraction regimes (`trace_only`, `random_only`, `trace_inverse`) to evaluate trajectory dynamics, structural alignment, and geometric metrics across trace strata.
 
-### Key Features**
+### Key Features
 * **Trajectory Dynamics**: Tracks step-wise L2 velocity, consecutive cosine distance, and Menger curvature across trace strata.
 * **Distance & Alignment**: Computes mean pairwise Cosine and Euclidean (L2) distance matrices, state magnitudes, and Linear Centered Kernel Alignment (CKA) using optimized Gram matrix centering.
 * **Information Imbalance**: Calculates asymmetric k-nearest-neighbor rank imbalance matrices across strata using `dadapy`.
