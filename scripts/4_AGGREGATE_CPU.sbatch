@@ -39,11 +39,15 @@ conda activate $ENV_PATH
 
 cd $LLM_STRACE_PATH
 
-python analyse/aggregate_straces.py \
-    --base_dir $LLM_STRACE_PATH/$BASE_RESULT_DIR \
+# python analyse/aggregate_straces.py \
+#     --base_dir $LLM_STRACE_PATH/$BASE_RESULT_DIR \
+#     --length $LENGTH \
+#     --max_files $MAX_FILES \
+#     --components
+
+python analyse/aggregate_multiling_straces.py \
     --length $LENGTH \
-    --max_files $MAX_FILES \
-    --components
+    --max_files $MAX_FILES
 
 
 echo "--- Finished CPU Job ---"
