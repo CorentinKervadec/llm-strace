@@ -84,7 +84,7 @@ We have already included the following LLMs to our framework.
 | :--- | :--- |
 | **Mistral** | `mistralai/Mistral-7B-v0.1` |
 | **OLMo 2** | `allenai/OLMo-2-0425-1B`, `allenai/OLMo-2-1124-7B`, `allenai/OLMo-2-1124-13B` |
-| **Qwen 3** | `Qwen/Qwen3-0.6B-Base`, `Qwen/Qwen3-1.7B-Base`, `Qwen/Qwen3-4B-Base`, `Qwen/Qwen3-8B-Base` |
+| **Qwen 3** | `Qwen/Qwen3-0.6B-Base`, `Qwen/Qwen3-1.7B-Base`, `Qwen/Qwen3-4B-Base`, `Qwen/Qwen3-8B-Base`, `Qwen/Qwen3-14B-Base` |
 | **Qwen 2.5** | `Qwen/Qwen2.5-0.5B`, `Qwen/Qwen2.5-1.5B`, `Qwen/Qwen2.5-3B`, `Qwen/Qwen2.5-7B`, `Qwen/Qwen2.5-14B`, `Qwen/Qwen2.5-32B` |
 | **Qwen 2** | `Qwen/Qwen2-0.5B`, `Qwen/Qwen2-1.5B`, `Qwen/Qwen2-7B` |
 | **Qwen 2** | `Qwen/Qwen2-0.5B`, `Qwen/Qwen2-1.5B`, `Qwen/Qwen2-7B` |
