@@ -37,6 +37,7 @@ ml Miniconda3
 eval "$(conda shell.bash hook)"
 conda activate $ENV_PATH
 
+
 cd $LLM_STRACE_PATH
 
 # python analyse/aggregate_straces.py \
