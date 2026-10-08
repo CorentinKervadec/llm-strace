@@ -53,6 +53,7 @@ python 2_stratification_cpu.py \
     --intermediate_dir $INTERMEDIATE_DIR \
     --strace_dir $STRACE_DIR \
     --importance $IMPORTANCE \
+    --thresholds 1e-5 1e-4 5e-4 1e-3 5e-3 1e-2 1e-1 0.99\
     --cleanup
 
 echo "--- Finished CPU Job Chunk $SLURM_ARRAY_TASK_ID ---"
