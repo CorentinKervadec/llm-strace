@@ -745,6 +745,104 @@ class LLM_STRACE:
         except Exception as e:
             print(f"[LLM_STRACE] Error saving file: {e}")
 
+    """
+    Functions added to the perform the corruption experiment
+    """
+
+    def prepare_corrupted_input(self, corrupted_text, next_word, device):
+        """
+        Tokenizes corrupted text and verifies that the sequence length 
+        matches the original clean input sequence length.
+        """
+        inputs = self.tokenizer(corrupted_text, return_tensors="pt")
+        input_ids = inputs["input_ids"].to(device)
+        attention_mask = inputs["attention_mask"].to(device)
+
+        orig_n_tokens = self.graph.graph.get("n_tokens")
+        if orig_n_tokens is not None:
+            print("Corrupted text:", corrupted_text)
+            assert input_ids.shape[1] == orig_n_tokens, (
+                f"Token count mismatch: corrupted text generated {input_ids.shape[1]} tokens, "
+                f"expected {orig_n_tokens} tokens."
+            )
+
+        target_ids = self.tokenizer(next_word, return_tensors="pt")["input_ids"].to(device)
+        return input_ids, attention_mask, target_ids
+
+
+    def compute_corrupted_stratum_evaluation(self, corrupted_text, next_word):
+        """
+        Evaluates pre-computed s-trace graph masks on corrupted input text.
+        
+        Computes two TV metrics for each stratum s:
+        1. TV(P_clean_trace(s), P_corrupt_trace(s)): Output sensitivity of trace s under context corruption.
+        2. TV(P_corrupt_full, P_corrupt_trace(s)): Trace reconstruction fidelity of the corrupted model.
+        """
+        device = 'cuda'
+
+        corrupt_ids, corrupt_mask, _ = self.prepare_corrupted_input(corrupted_text, next_word, device)
+
+        # Forward pass for full model on corrupted input
+        with torch.no_grad():
+            corrupt_full_outputs = self.llm(input_ids=corrupt_ids, attention_mask=corrupt_mask)
+            corrupt_full_logits = corrupt_full_outputs.logits.view(-1, self.llm.config.vocab_size).cpu()
+
+        tv_corrupt_vs_clean = []
+        tv_corrupt_reco = []
+
+        for i, stratum_index in tqdm(enumerate(self.strata_index), desc=f"[STRACE] Evaluating strata"):
+            
+            def filter_edges(u, v, k):  
+                return self.graph[u][v][k].get('stratum') <= stratum_index
+            # Create the subgraph view
+            stratum = nx.subgraph_view(self.graph, filter_edge=filter_edges)
+
+            # check that the stratum size is indeed correct
+            stratum_size = stratum.get_size()
+            if not self.strata_raw_size[i] == stratum_size:
+                raise MaskingError(f"Stratum {stratum_index} size mismatch: expected {self.strata_raw_size[i]}, got {stratum_size}")
+
+            graph_mask, nb_non_masked_edges, _ = prepare_mask(
+                graph=stratum, 
+                seq_len=self.graph.graph['n_tokens'],
+                nb_head=self.graph.graph['n_heads'], 
+                n_layers=self.graph.graph['n_layers'], 
+                inverse=False, keep_residual=False)
+
+            # check that the stratum size is indeed correct
+            if not self.strata_raw_size[i] == nb_non_masked_edges:
+                raise MaskingError(f"Mask {stratum_index} size mismatch: expected {self.strata_raw_size[i]}, got {nb_non_masked_edges}")
+            
+            with torch.no_grad():
+                corrupt_trace_output = self.llm(
+                    input_ids=corrupt_ids,
+                    attention_mask=corrupt_mask, 
+                    graph_mask=graph_mask, build_graph=None, unit_test=False, attn_implementation="eager")
+            corrupt_trace_logits = corrupt_trace_output.logits.view(-1, self.llm.config.vocab_size).cpu()
+            loss, entropy, predicted_token_id, rank = surprisal(corrupt_trace_logits, self.input_prepared[2])
+            
+            tv_corrupt_vs_clean.append(
+                get_total_variation(self.strata_logits[s].unsqueeze(0), corrupt_trace_logits.unsqueeze(0))
+            )
+
+            tv_corrupt_reco.append(
+                get_total_variation(corrupt_full_logits.unsqueeze(0), corrupt_trace_logits.unsqueeze(0))
+            )
+
+        self.strata_corrupted_tv_diff = np.array(tv_corrupt_vs_clean)
+        self.strata_corrupted_reco_tv = np.array(tv_corrupt_reco)
+
+
+    def save_light_corrupted(self, save_path):
+        """
+        Saves light serialization containing corrupted evaluation results alongside clean results.
+        """
+        data = {
+            "strata_corrupted_tv_diff": getattr(self, "strata_corrupted_tv_diff", None),
+            "strata_corrupted_reco_tv": getattr(self, "strata_corrupted_reco_tv", None),
+        }
+        np.savez_compressed(save_path, **data)
+
 def load_from_file_light(file_path: str, llm: PreTrainedModel = None, tokenizer = None):
     """
     Loads an LLM_STRACE object from a .npz file and re-attaches
