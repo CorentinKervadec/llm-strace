@@ -121,6 +121,7 @@ def main():
     parser.add_argument('--chunk_size', type=int, required=True, help='Number of sentences to process per job.')
     parser.add_argument('--total_sentences', type=int, required=True, help='Total size of the dataset.')
     parser.add_argument('--final_dir', type=str, required=True, help='Directory containing evaluated Stage 3 .npz results.')
+    parser.add_argument('--strace_dir', type=str, required=True, help='Directory containing Stage 2 extracted s-traces.')
     parser.add_argument('--cpu_offload', action='store_true', help='Enable CPU offload for large models.')
     parser.add_argument('--checkpoint', type=str, default='main')
     args = parser.parse_args()
@@ -186,7 +187,8 @@ def main():
 
     # --- 4. Process Chunk ---
     for sentence_index in range(start_index, end_index):
-        final_file_path = os.path.join(args.final_dir, f'strace_final_{sentence_index}.npz')
+        # final_file_path = os.path.join(args.final_dir, f'strace_final_{sentence_index}.npz')
+        final_file_path = os.path.join(args.strace_dir, f'strace_{sentence_index}.npz')
         hidden_file_path = os.path.join(args.final_dir, f'hidden_strace_{sentence_index}.npz')
 
         # Skip if hidden representations have already been extracted
@@ -212,7 +214,7 @@ def main():
                 sentence_index=sentence_index,
                 captured_hidden=captured_hidden,
                 do_random=True,
-                do_inverse=True
+                do_inverse=False
             )
             print(f"  > Representations extracted in {time.time() - t_start:.2f} s")
         except Exception as e:
