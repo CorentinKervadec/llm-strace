@@ -54,7 +54,7 @@ python analyse/process_multiling_to_tsv.py \
     --base_dir_template  $BASE_RESULT_DIR \
     --length $LENGTH \
     --max_files $MAX_FILES \
-    --output_tsv full_dataset_metrics_multiling.tsv
+    --output_tsv full_dataset_metrics_multiling_16_10.tsv
 
 
 echo "--- Finished CPU Job ---"

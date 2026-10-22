@@ -46,16 +46,6 @@ cd $LLM_STRACE_PATH
 : "${CPU_OFFLOAD:?CPU_OFFLOAD not set}"
 
 # Initialize the command in an array
-# CMD_ARGS=(
-#     --model_name "$MODEL_NAME"
-#     --chunk_id "$SLURM_ARRAY_TASK_ID"
-#     --chunk_size "$CHUNK_SIZE"
-#     --total_sentences "$TOTAL_SENTENCES"
-#     --strace_dir "$STRACE_DIR"
-#     --final_dir "$FINAL_DIR"
-#     --checkpoint "$CHECKPOINT"
-#     --cleanup
-# )
 CMD_ARGS=(
     --model_name "$MODEL_NAME"
     --chunk_id "$SLURM_ARRAY_TASK_ID"
@@ -64,7 +54,17 @@ CMD_ARGS=(
     --strace_dir "$STRACE_DIR"
     --final_dir "$FINAL_DIR"
     --checkpoint "$CHECKPOINT"
+    --cleanup
 )
+# CMD_ARGS=(
+#     --model_name "$MODEL_NAME"
+#     --chunk_id "$SLURM_ARRAY_TASK_ID"
+#     --chunk_size "$CHUNK_SIZE"
+#     --total_sentences "$TOTAL_SENTENCES"
+#     --strace_dir "$STRACE_DIR"
+#     --final_dir "$FINAL_DIR"
+#     --checkpoint "$CHECKPOINT"
+# )
 
 # Conditionally add the flag
 if [ "$CPU_OFFLOAD" = "1" ]; then
@@ -72,9 +72,9 @@ if [ "$CPU_OFFLOAD" = "1" ]; then
 fi
 
 # Run the Stage 3 GPU-bound Python script
-# python 3_evaluate_gpu.py "${CMD_ARGS[@]}"
+python 3_evaluate_gpu.py "${CMD_ARGS[@]}"
 # python 3_patch_nucleus_tokens.py "${CMD_ARGS[@]}"
-python 3_extract_last_hidden.py "${CMD_ARGS[@]}"
+# python 3_extract_last_hidden.py "${CMD_ARGS[@]}"
 
 echo "--- Finished GPU Job Stage 3 (Reco Error) Chunk $SLURM_ARRAY_TASK_ID ---"
 date
