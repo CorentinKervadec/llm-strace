@@ -69,8 +69,12 @@ def main(model_name: str, threshold_values: list = None):
         ("Its southern terminus is at an intersection with NY 383 in the village of Scottsville. The northern end of",  "the")
     ]
     
+    sentences_rus = [
+        ("В то же время большая часть солдат и рабочих отправилась по", "Арсенальной")
+    ]
+
     # Select the dataset to run this test with
-    sentences = sentences_20
+    sentences = sentences_rus
     
     # --- 2. Define Hyperparameters & Configuration ---
     
@@ -145,7 +149,7 @@ def main(model_name: str, threshold_values: list = None):
         with SuppressUnitTestLogs():
             strace.populate_graph(
                 importance_mode, # how the edge importance is computed
-                unit_test=True # perform test to control that the LLM integrity is preserved
+                unit_test=False # perform test to control that the LLM integrity is preserved
                 )
         print(f"[MAIN]   Time to populate graph: {time.time() - start_time:.2f} s")
         
@@ -166,7 +170,7 @@ def main(model_name: str, threshold_values: list = None):
         print(f"[MAIN]   Time to compute stratum reco error: {time.time() - start_time:.2f} s")
 
         # --- Display Results ---
-        strace.print_graph_sizes_and_thresholds_friendly()
+        strace.print_graph_sizes_and_thresholds()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
