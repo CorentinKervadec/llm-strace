@@ -110,17 +110,21 @@ def main():
                     full_prediction = prediction_trace[np.argmax(rel_size)]
                     
                     # Tokenize/map to vocab IDs to prevent formatting issue in TSV
+                    # > actually, we will use the string because of tokenizing/detokenizing issue
+                    # with non-latin script
                     bow_special_character = 'Ġ'
                     full_prediction_token = []
                     for p in full_prediction:
-                        if p in vocab:
-                            full_prediction_token.append(vocab[p])
-                        elif p.startswith(' '):
-                            new_p = bow_special_character + p[1:]
-                            if new_p in vocab:
-                                full_prediction_token.append(vocab[new_p])
-                            else:
-                                print(f"[WARNING] Token not in vocab: {p}")
+                        full_prediction_token.append(p)
+                    #     if p in vocab:
+                    #         full_prediction_token.append(vocab[p])
+                    #     elif p.startswith(' '):
+                    #         new_p = bow_special_character + p[1:]
+                    #         if new_p in vocab:
+                    #             full_prediction_token.append(vocab[new_p])
+                    #         else:
+                    #             print(f"[WARNING] Token not in vocab: {p}")
+                    
                     
                     # Check for None, NaN, or corrupted values
                     if (pd.isna(full_entropy) or pd.isna(full_loss) or pd.isna(auc_val)):
