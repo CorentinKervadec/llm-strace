@@ -68,6 +68,7 @@ WORKBENCH.sh
 *.pdf
 *.html
 *.tsv
+*.csv
 
 # 5. Generated Directories (Whitelist Strategy)
 
