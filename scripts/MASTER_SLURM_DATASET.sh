@@ -15,11 +15,13 @@
 #   7. split:        (Required) e.g., "0", "40" or "none" (use "none" or "" if no split)
 #   8. nb_data:      (Required) e.g., 10000
 #   9. chunk_size:   (Required) e.g., 50
-#   10. start_stage:  (Optional) Default: 1 (which stage to start with)
-#   11. end_stage:   (Optional) Default: 3
+#   10. start_stage: (Optional) Default: 1 (which stage to start with)
+#   11. end_stage:   (Optional) Default: 4
 #
 # Example:
-#   ./MASTER_SLURM_DATASET.sh high-gpu 0 "allenai/OLMo-2-0425-1B" main L1-norm "wikitext" 40 5000 100 1 3
+#   ./MASTER_SLURM_DATASET.sh high-gpu 0 "allenai/OLMo-2-0425-1B" main L1-norm "wikitext" 40 5000 100 1 4
+#   Run only Stage 4:
+#   ./MASTER_SLURM_DATASET.sh high-gpu 0 "allenai/OLMo-2-0425-1B" main L1-norm "wikitext" 40 5000 100 4 4
 #-----------------------------------------------------------------------
 
 set -e # Exit immediately if any command fails
@@ -41,7 +43,7 @@ SPLIT=$7
 NB_DATA=$8
 CHUNK_SIZE=${9}
 START_STAGE=${10:-1}
-END_STAGE=${11:-3}
+END_STAGE=${11:-4}
 
 MAX_CONCURRENT_JOBS=50
 
@@ -52,11 +54,9 @@ SAVE_BASE_DIR='/homes/users/ckervadec/scratch/llm-strace'
 if [ "$SPLIT" == "none" ] || [ -z "$SPLIT" ]; then
     SPLIT_SUFFIX=""
     SPLIT_VAL=""
-    # echo "No Split specified."
 else
     SPLIT_SUFFIX="_${SPLIT}"
     SPLIT_VAL=$SPLIT
-    # echo "Split detected: $SPLIT"
 fi
 
 echo "--- Configuration ---"
@@ -123,10 +123,9 @@ export SPLIT=$SPLIT_VAL
 export CPU_OFFLOAD=$CPU_OFFLOAD
 
 # Define all directory paths
-# Base directory uses just the DATASET_NAME
 BASE_OUTPUT_DIR="$SAVE_BASE_DIR/results_${IMPORTANCE}_${DATASET_NAME}/${SANITIZED_MODEL_NAME}"
 
-# Subdirectories use the SPLIT_SUFFIX (e.g., _S0 or empty)
+# Subdirectories use the SPLIT_SUFFIX
 export INTERMEDIATE_DIR="${BASE_OUTPUT_DIR}/${CHECKPOINT}/intermediate_graphs${SPLIT_SUFFIX}"
 export STRACE_DIR="${BASE_OUTPUT_DIR}/${CHECKPOINT}/intermediate_straces${SPLIT_SUFFIX}"
 export FINAL_DIR="${BASE_OUTPUT_DIR}/${CHECKPOINT}/final_straces${SPLIT_SUFFIX}"
@@ -202,7 +201,7 @@ if [ "$START_STAGE" -le 2 ] && [ "$END_STAGE" -ge 2 ]; then
     
     DEP_FLAG=""
     if [ ! -z "$LAST_JOB_ID" ]; then
-        DEP_FLAG="--dependency=aftercorr:${LAST_JOB_ID}"
+        DEP_FLAG="--dependency=aftercorr:${LAST_JOB_ID}  --kill-on-invalid-dep=yes"
         echo "  -> Will run after corresponding Stage 1 jobs."
     elif [ "$START_STAGE" -eq 2 ]; then
         check_files $INTERMEDIATE_DIR $TOTAL_SENTENCES "Stage 2"
@@ -230,11 +229,10 @@ if [ "$START_STAGE" -le 3 ] && [ "$END_STAGE" -ge 3 ]; then
     
     DEP_FLAG=""
     if [ ! -z "$LAST_JOB_ID" ]; then
-        DEP_FLAG="--dependency=aftercorr:${LAST_JOB_ID}"
+        DEP_FLAG="--dependency=aftercorr:${LAST_JOB_ID}  --kill-on-invalid-dep=yes"
         echo "  -> Will run after corresponding Stage 2 jobs."
     elif [ "$START_STAGE" -eq 3 ]; then
         check_files $STRACE_DIR $TOTAL_SENTENCES "Stage 3"
-        # echo "Skipping check file..."
     fi
 
     GPU_JOB_ID_2=$(sbatch --parsable \
@@ -252,6 +250,35 @@ if [ "$START_STAGE" -le 3 ] && [ "$END_STAGE" -ge 3 ]; then
     fi
     echo "  -> Stage 3 submitted with Array ID: $GPU_JOB_ID_2"
     LAST_JOB_ID=$GPU_JOB_ID_2
+fi
+
+# --- Stage 4: GPU Representation Extraction ---
+if [ "$START_STAGE" -le 4 ] && [ "$END_STAGE" -ge 4 ]; then
+    echo "Submitting Stage 4: GPU Representation Extraction..."
+    
+    DEP_FLAG=""
+    if [ ! -z "$LAST_JOB_ID" ]; then
+        DEP_FLAG="--dependency=aftercorr:${LAST_JOB_ID}  --kill-on-invalid-dep=yes"
+        echo "  -> Will run after corresponding Stage 3 jobs."
+    elif [ "$START_STAGE" -eq 4 ]; then
+        check_files $STRACE_DIR $TOTAL_SENTENCES "Stage 4"
+    fi
+
+    GPU_JOB_ID_3=$(sbatch --parsable \
+        --array=$ARRAY_RANGE \
+        $DEP_FLAG \
+        $PARTITION_FLAGS \
+        --export=ALL,STRACE_DIR,FINAL_DIR \
+        --output="${LOG_DIR}/4_gpu_%A_%a.out" \
+        --job-name="${SANITIZED_MODEL_NAME}_extract_rep_gpu" \
+        ./scripts/5_EXTRACT_REP_GPU.sbatch)
+
+    if [ -z "$GPU_JOB_ID_3" ]; then
+        echo "Error: Failed to submit GPU Stage 4 job. Exiting."
+        exit 1
+    fi
+    echo "  -> Stage 4 submitted with Array ID: $GPU_JOB_ID_3"
+    LAST_JOB_ID=$GPU_JOB_ID_3
 fi
 
 echo ""

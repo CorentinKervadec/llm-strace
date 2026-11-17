@@ -187,8 +187,8 @@ def main():
 
     # --- 4. Process Chunk ---
     for sentence_index in range(start_index, end_index):
-        # final_file_path = os.path.join(args.final_dir, f'strace_final_{sentence_index}.npz')
-        final_file_path = os.path.join(args.strace_dir, f'strace_{sentence_index}.npz')
+        final_file_path = os.path.join(args.final_dir, f'strace_final_{sentence_index}.npz')
+        # final_file_path = os.path.join(args.strace_dir, f'strace_{sentence_index}.npz')
         hidden_file_path = os.path.join(args.final_dir, f'hidden_strace_{sentence_index}.npz')
 
         # Skip if hidden representations have already been extracted
