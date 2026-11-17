@@ -43,7 +43,8 @@ AVAILABLE_MODELS = [
     "deepseek-ai/deepseek-llm-7b-base",
     "microsoft/phi-4",
     "meta-llama/Llama-2-7b-hf",
-    "meta-llama/Llama-2-13b-hf"
+    "meta-llama/Llama-2-13b-hf",
+    "swiss-ai/Apertus-8B-2509"
 ]
 
 def main(model_name: str, threshold_values: list = None):
@@ -74,13 +75,13 @@ def main(model_name: str, threshold_values: list = None):
     ]
 
     # Select the dataset to run this test with
-    sentences = sentences_rus
+    sentences = sentences_20
     
     # --- 2. Define Hyperparameters & Configuration ---
     
     # Set to False for full precision (float32).
     # Note: half precision causes approximation errors.
-    half_precision = False 
+    half_precision = True 
         
     # importance_mode: 'L1-norm' is the default as per the s-Trace method.
     importance_mode = 'L1-norm'

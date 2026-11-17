@@ -30,8 +30,12 @@ def get_model_class(model_type):
             return MistralForCausalLM
         elif model_type == "phi3":
             from .modeling_phi3 import Phi3ForCausalLM
-            print(f"Successfully importedPhi3ForCausalLM")
+            print(f"Successfully imported Phi3ForCausalLM")
             return Phi3ForCausalLM
+        elif model_type == "apertus":
+            from .modeling_apertus import ApertusForCausalLM
+            print(f"Successfully imported ApertusForCausalLM")
+            return ApertusForCausalLM
         else:
             raise ValueError(f"Unsupported model type: {model_type}")
     except ImportError as e:
@@ -59,5 +63,7 @@ def identify_model_type(model_path: str) -> str:
         return "llama" # deepseek llm use the llama code (LlamaForCausalLM)
     elif "phi-4" in model_name:
         return "phi3" # phi4 is based on phi3 code
+    elif "apertus" in model_name:
+        return "apertus"
     else:
         return None

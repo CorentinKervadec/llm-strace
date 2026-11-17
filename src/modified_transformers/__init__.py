@@ -40,6 +40,12 @@ try:
 except ImportError:
     _has_phi3 = False
 
+try:
+    from .modeling_apertus import ApertusForCausalLM, ApertusModel, ApertusPreTrainedModel
+    _has_apertus = True
+except ImportError:
+    _has_apertus = False
+
 
 # Build list of available models
 __all__ = []
@@ -64,3 +70,6 @@ if _has_mistral:
 
 if _has_phi3:
     __all__.extend(["Phi3ForCausalLM", "Phi3Model", "Phi3PreTrainedModel"])
+
+if _has_apertus:
+    __all__.extend(["ApertusForCausalLM", "ApertusModel", "ApertusPreTrainedModel"])
