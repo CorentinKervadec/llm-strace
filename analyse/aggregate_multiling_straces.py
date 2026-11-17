@@ -14,7 +14,7 @@ warnings.filterwarnings("default", category=RuntimeWarning)
 
 SAVE_FOLDER = "./"
 COMMON_SIZE = np.logspace(-5, 0, 150)
-LANGS = ['ar', 'es', 'ru']
+LANGS = ['ar', 'es', 'ru', 'fr']
 BASE_DIR_TEMPLATE = "/homes/users/ckervadec/scratch/llm-strace/results_L1-norm_wiki-{lang}"
 
 # =========================

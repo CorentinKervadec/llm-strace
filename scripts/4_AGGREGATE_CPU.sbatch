@@ -46,15 +46,20 @@ cd $LLM_STRACE_PATH
 #     --max_files $MAX_FILES \
 #     --components
 
+python analyse/aggregate_straces_per_size.py \
+    --base_dir $LLM_STRACE_PATH/$BASE_RESULT_DIR \
+    --length $LENGTH \
+    --max_files $MAX_FILES
+
 # python analyse/aggregate_multiling_straces.py \
 #     --length $LENGTH \
 #     --max_files $MAX_FILES
 
-python analyse/process_multiling_to_tsv.py \
-    --base_dir_template  $BASE_RESULT_DIR \
-    --length $LENGTH \
-    --max_files $MAX_FILES \
-    --output_tsv full_dataset_metrics_multiling_16_10.tsv
+# python analyse/process_multiling_to_tsv.py \
+#     --base_dir_template  $BASE_RESULT_DIR \
+#     --length $LENGTH \
+#     --max_files $MAX_FILES \
+#     --output_tsv full_dataset_metrics_multiling_02_11.tsv
 
 
 echo "--- Finished CPU Job ---"

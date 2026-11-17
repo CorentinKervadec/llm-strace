@@ -21,7 +21,8 @@ model2hf_mapping = {
     "deepseek-llm-7b-base": "deepseek-ai/deepseek-llm-7b-base",
     "phi-4": "microsoft/phi-4",
     "Llama-2-7b-hf": "meta-llama/Llama-2-7b-hf",
-    "Llama-2-13b-hf": "meta-llama/Llama-2-13b-hf"
+    "Llama-2-13b-hf": "meta-llama/Llama-2-13b-hf",
+    "Apertus-8B-2509": "swiss-ai/Apertus-8B-2509",
 }
 
 
@@ -84,6 +85,8 @@ def main():
             for f in tqdm(npz_files, desc=f"Language: {lang}"):
                 try:
                     data = np.load(f, allow_pickle=True)
+
+                    print(data)
                     
                     # 1. Filename and Sentence ID
                     fname = os.path.basename(f)
@@ -128,6 +131,7 @@ def main():
                     
                     # Check for None, NaN, or corrupted values
                     if (pd.isna(full_entropy) or pd.isna(full_loss) or pd.isna(auc_val)):
+                        # print(f"Entropy: {full_entropy}; Loss: {full_loss}; AUC: {auc_val}")
                         continue
                     
                     records.append({
